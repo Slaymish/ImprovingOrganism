@@ -1,0 +1,15 @@
+# Lightweight requirements for development/testing without heavy ML dependencies
+fastapi
+uvicorn
+sqlalchemy
+pydantic
+pydantic-settings
+python-dotenv
+
+# Optional: Add these when you need full ML functionality
+# torch
+# transformers
+# peft
+# datasets
+# accelerate
+# bitsandbytes

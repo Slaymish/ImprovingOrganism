@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+torch
+transformers
+peft
+sqlalchemy
+pydantic
+pydantic-settings
+python-dotenv
+weaviate-client
+datasets
+accelerate
+bitsandbytes
