@@ -281,7 +281,7 @@ class Updater:
             logger.error(f"Evaluation failed: {e}")
             return 3.0
     
-    def run_update_cycle(self):
+    def run_training_cycle(self):
         """Main update cycle: check feedback, retrain if needed"""
         logger.info("Starting update cycle...")
         
@@ -317,15 +317,24 @@ class Updater:
             logger.error("LoRA fine-tuning failed")
 
 def main():
-    """Main updater function"""
+    """Main function to run the continuous training loop"""
     updater = Updater()
     
-    logger.info("Updater starting...")
+    # Set a default training interval (e.g., 1 hour)
+    training_interval_seconds = int(os.getenv("TRAINING_INTERVAL", 3600))
     
-    # Run one update cycle
-    updater.run_update_cycle()
+    logger.info("🚀 Starting continuous training service...")
+    logger.info(f"Training check interval: {training_interval_seconds} seconds")
     
-    logger.info("Updater cycle completed")
+    while True:
+        try:
+            updater.run_training_cycle()
+        except Exception as e:
+            logger.error(f"An error occurred during the training cycle: {e}", exc_info=True)
+        
+        logger.info(f"Next training check in {training_interval_seconds} seconds.")
+        time.sleep(training_interval_seconds)
 
 if __name__ == "__main__":
+    import time
     main()
