@@ -4,6 +4,8 @@ services:
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000
     volumes:
       - ./src:/app/src
+      - ./data:/app/data
+      - ./adapters:/app/adapters
       - ./logs:/app/logs
     ports:
       - "8000:8000"
@@ -15,6 +17,8 @@ services:
     command: python -m src.updater
     volumes:
       - ./src:/app/src
+      - ./data:/app/data
+      - ./adapters:/app/adapters
       - ./logs:/app/logs
     environment:
       - PYTHONPATH=/app

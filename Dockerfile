@@ -11,6 +11,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ ./src/
+COPY data/ ./data/
+COPY adapters/ ./adapters/
 COPY logs/ ./logs/
 
 # Create empty __init__.py if it doesn't exist
