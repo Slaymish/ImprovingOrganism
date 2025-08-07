@@ -8,6 +8,9 @@ python-dotenv
 
 # Optional: Add these when you need full ML functionality
 # torch
+pytest
+pytest-cov
+requests
 # transformers
 # peft
 # datasets

@@ -198,18 +198,18 @@ class Updater:
             
             # Training arguments
             training_args = TrainingArguments(
-                output_dir=f"./training_output_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                num_train_epochs=2,
-                per_device_train_batch_size=settings.batch_size,
+                output_dir=os.path.join(settings.lora_path, "updater_training"),
+                num_train_epochs=3,
+                per_device_train_batch_size=2,
                 gradient_accumulation_steps=4,
-                warmup_steps=10,
-                logging_steps=10,
-                save_steps=100,
-                evaluation_strategy="no",
-                save_strategy="steps",
-                load_best_model_at_end=False,
-                report_to="none",
-                remove_unused_columns=False,
+                learning_rate=5e-5,
+                evaluation_strategy="epoch",
+                save_strategy="epoch",
+                load_best_model_at_end=True,
+                metric_for_best_model="eval_loss",
+                greater_is_better=False,
+                report_to=None,
+                remove_unused_columns=False
             )
             
             # Data collator

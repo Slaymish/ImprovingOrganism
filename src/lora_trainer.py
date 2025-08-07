@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 try:
     from transformers import (
         AutoTokenizer, AutoModelForCausalLM, TrainingArguments, 
-        Trainer, DataCollatorForLanguageModeling
+        Trainer, DataCollatorForLanguageModeling, EarlyStoppingCallback
     )
     from peft import (
         LoraConfig, get_peft_model, TaskType, prepare_model_for_kbit_training
@@ -73,7 +73,7 @@ class LoRATrainer:
             "output_dir": os.path.join(settings.lora_path, "training_output"),
             "per_device_eval_batch_size": 1,
             "fp16": True if self.device == "cuda" else False,
-            "eval_strategy": "steps",
+            "evaluation_strategy": "steps",
             "save_total_limit": 2,  # Keep fewer checkpoints
             "load_best_model_at_end": True,
             "metric_for_best_model": "eval_loss",
@@ -81,8 +81,6 @@ class LoRATrainer:
             "report_to": None,
             "remove_unused_columns": False,
             "dataloader_pin_memory": False,
-            "early_stopping_patience": 3,  # Early stopping
-            "early_stopping_threshold": 0.001,
         }
         
         self.training_args = TrainingArguments(**base_args)
@@ -319,6 +317,7 @@ class LoRATrainer:
                 eval_dataset=eval_dataset,
                 data_collator=data_collator,
                 tokenizer=self.tokenizer,
+                callbacks=[EarlyStoppingCallback(early_stopping_patience=3, early_stopping_threshold=0.001)]
             )
             
             # Start training
