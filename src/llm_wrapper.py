@@ -56,6 +56,7 @@ class LLMWrapper:
         
         if ML_AVAILABLE:
             try:
+                logger.info(f"🤖 Found model: {settings.model_name}")
                 self.tokenizer = AutoTokenizer.from_pretrained(settings.model_name)
                 base_model = AutoModelForCausalLM.from_pretrained(
                     settings.model_name, 
