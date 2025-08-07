@@ -17,19 +17,46 @@ class CriticModule:
         - Relevance to prompt
         """
         coherence_score = self._score_coherence(output)
-        novelty_score = self._score_novelty(output, memory)
+        novelty_score = self._score_novelty_semantic(output, memory) # Changed to semantic novelty
         alignment_score = self._score_memory_alignment(prompt, output, memory)
         relevance_score = self._score_relevance(prompt, output)
         
         # Weighted combination
         final_score = (
             0.1 * coherence_score +
-            0.1 * novelty_score +
-            0.05 * alignment_score +
-            0.75 * relevance_score
+            0.25 * novelty_score + # Increased weight for novelty
+            0.25 * alignment_score + # Increased weight for alignment
+            0.4 * relevance_score # Adjusted weight for relevance
         )
         
         return min(5.0, max(0.0, final_score))
+
+    def _score_novelty_semantic(self, output: str, memory: List[Any]) -> float:
+        """Score based on semantic uniqueness compared to previous outputs."""
+        if not hasattr(memory, 'search_semantic'):
+            # Fallback to old method if memory module doesn't support semantic search
+            return self._score_novelty(output, memory)
+
+        similar_entries = memory.search_semantic(output, limit=5, entry_types=['output', 'self_output'])
+        
+        if not similar_entries:
+            return 5.0
+
+        # The distance from Weaviate is a measure of similarity. Closer to 0 is more similar.
+        distances = [entry['_additional']['distance'] for entry in similar_entries]
+        
+        # Average distance of the top 5 most similar items.
+        # A small distance means it's very similar to existing content, so novelty should be low.
+        # A large distance means it's very different, so novelty should be high.
+        avg_distance = sum(distances) / len(distances)
+
+        # Normalize the score. The distance can range, but typically for cosine similarity it's 0 to 2.
+        # Let's scale it to be more intuitive for a 0-5 score.
+        # If avg_distance is small (e.g., < 0.1), it's very similar, score should be low.
+        # If avg_distance is large (e.g., > 0.5), it's very different, score should be high.
+        novelty_score = 5.0 * min(1.0, avg_distance * 2) # Scale distance to be more impactful
+
+        return max(0.0, min(5.0, novelty_score))
     
     def _score_coherence(self, text: str) -> float:
         """Score based on grammatical structure and readability"""
@@ -102,19 +129,25 @@ class CriticModule:
         output_words = set(output.lower().split())
         
         relevant_memories = []
-        for entry in memory:
-            if hasattr(entry, 'content'):
-                entry_words = set(entry.content.lower().split())
-                if len(prompt_words & entry_words) > 0:  # Related to current prompt
-                    relevant_memories.append(entry)
-        
+        if hasattr(memory, 'search_semantic'):
+            # Use semantic search if available
+            relevant_memories_data = memory.search_semantic(prompt, limit=5)
+            relevant_memories = [entry['content'] for entry in relevant_memories_data]
+        else:
+            # Fallback to keyword search
+            for entry in memory:
+                if hasattr(entry, 'content'):
+                    entry_words = set(entry.content.lower().split())
+                    if len(prompt_words & entry_words) > 0:  # Related to current prompt
+                        relevant_memories.append(entry.content)
+
         if not relevant_memories:
             return 3.0
             
         # Check consistency with relevant memories
         consistency_scores = []
-        for memory_entry in relevant_memories[-10:]:  # Recent relevant memories
-            memory_words = set(memory_entry.content.lower().split())
+        for memory_content in relevant_memories[-10:]:  # Recent relevant memories
+            memory_words = set(memory_content.lower().split())
             consistency = len(output_words & memory_words) / len(output_words | memory_words) if (output_words | memory_words) else 0
             consistency_scores.append(consistency)
         
@@ -164,7 +197,7 @@ class CriticModule:
         """Get breakdown of all scoring components"""
         return {
             'coherence': self._score_coherence(output),
-            'novelty': self._score_novelty(output, memory),
+            'novelty': self._score_novelty_semantic(output, memory),
             'memory_alignment': self._score_memory_alignment(prompt, output, memory),
             'relevance': self._score_relevance(prompt, output),
             'overall': self.score(prompt, output, memory)

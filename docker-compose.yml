@@ -1,4 +1,19 @@
 services:
+  weaviate:
+    image: semitechnologies/weaviate:1.25.4
+    ports:
+      - "8080:8080"
+      - "50051:50051"
+    volumes:
+      - ./data/weaviate:/root/.local/share/weaviate
+    restart: on-failure:0
+    environment:
+      QUERY_DEFAULTS_LIMIT: 25
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
+      DEFAULT_VECTORIZER_MODULE: 'none'
+      ENABLE_MODULES: 'text2vec-openai'
+      CLUSTER_HOSTNAME: 'node1'
+      PERSISTENCE_DATA_PATH: '/root/.local/share/weaviate'
   api:
     build: .
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000
@@ -12,6 +27,8 @@ services:
     environment:
       - PYTHONPATH=/app
       - LOG_LEVEL=DEBUG
+    depends_on:
+      - weaviate
   training:
     build: .
     command: python -m src.updater
@@ -23,4 +40,5 @@ services:
     environment:
       - PYTHONPATH=/app
       - LOG_LEVEL=INFO
-      - LOG_LEVEL=INFO
+    depends_on:
+      - weaviate

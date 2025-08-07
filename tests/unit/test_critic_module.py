@@ -5,38 +5,87 @@ from unittest.mock import patch, MagicMock
 import numpy as np
 
 # Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'src'))
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
 
-from src.critic_module import CriticModule
+from critic_module import CriticModule
 
 @pytest.fixture
 def critic():
     """Fixture for CriticModule"""
     return CriticModule()
 
-def test_comprehensive_scoring(critic):
-    """Test multi-dimensional scoring system"""
-    prompt = "Explain quantum computing"
-    response = "Quantum computing uses quantum mechanical phenomena like superposition and entanglement to process information in ways that classical computers cannot."
-    context = ["Previous discussion about classical computing", "User interested in advanced topics"]
+def test_semantic_novelty_scoring(critic):
+    """Test the semantic novelty scoring"""
+    output = "This is a new and unique sentence."
     
-    score = critic.score(prompt, response, context)
+    # Mock the memory module and its semantic search
+    mock_memory = MagicMock()
     
-    # Should be a float between 0 and 5
-    assert isinstance(score, float)
-    assert 0.0 <= score <= 5.0
+    # Case 1: Very similar content exists
+    mock_memory.search_semantic.return_value = [
+        {'_additional': {'distance': 0.05}}, # very similar
+        {'_additional': {'distance': 0.1}}
+    ]
+    low_novelty_score = critic._score_novelty_semantic(output, mock_memory)
+    
+    # Case 2: Very different content exists
+    mock_memory.search_semantic.return_value = [
+        {'_additional': {'distance': 0.8}}, # very different
+        {'_additional': {'distance': 0.9}}
+    ]
+    high_novelty_score = critic._score_novelty_semantic(output, mock_memory)
+    
+    # Case 3: No similar content
+    mock_memory.search_semantic.return_value = []
+    no_content_score = critic._score_novelty_semantic(output, mock_memory)
 
-def test_score_components(critic):
-    """Test individual scoring components"""
-    prompt = "What is 2+2?"
-    good_response = "2+2 equals 4. This is basic arithmetic addition where we combine two quantities of 2 to get a sum of 4."
-    bad_response = "flying purple monkeys"
+    assert high_novelty_score > low_novelty_score
+    assert no_content_score == 5.0
+
+def test_semantic_memory_alignment(critic):
+    """Test memory alignment with semantic search"""
+    prompt = "Tell me about dogs"
+    output = "Dogs are loyal companions."
     
-    good_score = critic.score(prompt, good_response, [])
-    bad_score = critic.score(prompt, bad_response, [])
+    mock_memory = MagicMock()
+    mock_memory.search_semantic.return_value = [
+        {'content': 'Canine pets are great.'},
+        {'content': 'Wolves are ancestors of dogs.'}
+    ]
     
-    # Good response should score higher
+    alignment_score = critic._score_memory_alignment(prompt, output, mock_memory)
+    
+    assert alignment_score > 3.0 # Should be a good score
+
+def test_score_relevance(critic):
+    """Test the relevance scoring"""
+    prompt = "What is the capital of France?"
+    good_response = "The capital of France is Paris."
+    bad_response = "I like turtles."
+    
+    good_score = critic._score_relevance(prompt, good_response)
+    bad_score = critic._score_relevance(prompt, bad_response)
+    
     assert good_score > bad_score
-    assert good_score > 3.0  # Should be reasonable 
-    assert bad_score < 2.5      # Should be poor due to irrelevance
+    assert good_score > 4.0
+    assert bad_score < 2.0
+
+def test_overall_score(critic):
+    """Test the overall weighted score"""
+    prompt = "Explain photosynthesis"
+    output = "Photosynthesis is the process used by plants, algae and certain bacteria to harness energy from sunlight and turn it into chemical energy."
+    
+    mock_memory = MagicMock()
+    mock_memory.search_semantic.return_value = [] # Assume high novelty
+    
+    # Mock the individual score components
+    with patch.object(critic, '_score_coherence', return_value=4.5), \
+         patch.object(critic, '_score_novelty_semantic', return_value=5.0), \
+         patch.object(critic, '_score_memory_alignment', return_value=4.0), \
+         patch.object(critic, '_score_relevance', return_value=4.8):
+        
+        score = critic.score(prompt, output, mock_memory)
+        
+        # Expected score = (0.1 * 4.5) + (0.25 * 5.0) + (0.25 * 4.0) + (0.4 * 4.8)
+        # = 0.45 + 1.25 + 1.0 + 1.92 = 4.62
+        assert abs(score - 4.62) < 0.01

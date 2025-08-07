@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
@@ -13,4 +14,8 @@ class Settings(BaseSettings):
     max_gpu_memory_gb: float = float(os.getenv("MAX_GPU_MEMORY_GB", "4.0"))
     enable_memory_optimization: bool = os.getenv("ENABLE_MEMORY_OPTIMIZATION", "true").lower() == "true"
 
+    # Weaviate settings
+    weaviate_url: str = os.getenv("WEAVIATE_URL", "http://localhost:8080")
+    weaviate_api_key: Optional[str] = os.getenv("WEAVIATE_API_KEY", None)
+    
 settings = Settings()

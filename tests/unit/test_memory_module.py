@@ -5,44 +5,61 @@ from unittest.mock import patch, MagicMock
 import numpy as np
 
 # Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'src'))
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
 
 from src.memory_module import MemoryModule
 
 @pytest.fixture
-def memory_module():
-    """Fixture for MemoryModule"""
-    return MemoryModule()
+@patch('src.memory_module.VectorMemory')
+def memory_module(MockVectorMemory):
+    """Fixture for MemoryModule with a mocked VectorMemory."""
+    # Prevent the real __init__ from running
+    with patch.object(MemoryModule, '__init__', lambda x: None):
+        memory_module = MemoryModule()
+        memory_module.session = MagicMock()
+        memory_module.vector_memory = MockVectorMemory.return_value
+        yield memory_module
 
-def test_basic_write_read(memory_module):
-    """Test basic write and read operations"""
-    # Test writing different entry types
-    id1 = memory_module.write("test prompt", entry_type="prompt")
-    id2 = memory_module.write("test output", entry_type="output", session_id="test_session")
-    id3 = memory_module.write("test feedback", entry_type="feedback", score=4.5)
+def test_write_calls_vector_memory(memory_module):
+    """Test that write method also calls vector_memory.add_entry"""
+    # Mock the timestamp attribute on the entry object
+    mock_entry = MagicMock()
+    mock_entry.timestamp.isoformat.return_value = "2023-01-01T12:00:00"
     
-    # Test that we can read entries
-    all_entries = memory_module.read_all()
-    assert len(all_entries) >= 3
+    # When a new MemoryEntry is created, return our mock
+    with patch('src.memory_module.MemoryEntry', return_value=mock_entry):
+        memory_module.write("test content", "test_type", session_id="s1", score=4.5)
     
-    # Test reading by type
-    prompts = memory_module.read_by_type("prompt")
-    assert len(prompts) >= 1
+    # Verify that the database session was used
+    memory_module.session.add.assert_called_once()
+    memory_module.session.commit.assert_called_once()
     
-    outputs = memory_module.read_by_type("output")
-    assert len(outputs) >= 1
-    
-    feedback = memory_module.read_by_type("feedback")
-    assert len(feedback) >= 1
+    # Verify that vector_memory was called
+    memory_module.vector_memory.add_entry.assert_called_once()
+    call_args = memory_module.vector_memory.add_entry.call_args[1]
+    assert call_args['content'] == "test content"
+    assert call_args['entry_type'] == "test_type"
+    assert call_args['timestamp'] == "2023-01-01T12:00:00"
 
-def test_training_data_extraction(memory_module):
+def test_search_semantic_calls_vector_memory(memory_module):
+    """Test that search_semantic method calls vector_memory.search"""
+    memory_module.search_semantic("test query", limit=10, entry_types=["prompt"])
+    
+    memory_module.vector_memory.search.assert_called_once_with("test query", 10, ["prompt"])
+
+def test_get_training_data(memory_module):
     """Test training data preparation"""
-    # Add some conversational data
-    memory_module.write("What is AI?", entry_type="prompt", session_id="conv1")
-    memory_module.write("AI is artificial intelligence...", entry_type="output", session_id="conv1")
-    memory_module.write("Good explanation", entry_type="feedback", session_id="conv1", score=4.0)
+    # Mock the feedback entries from the database
+    mock_feedback = MagicMock()
+    mock_feedback.content = "FEEDBACK: What is AI? -> AI is artificial intelligence... | score=4.0"
+    mock_feedback.score = 4.0
     
-    # Test training data extraction
+    memory_module.get_feedback_entries = MagicMock(return_value=[mock_feedback])
+    
     training_data = memory_module.get_training_data()
-    assert len(training_data) >= 1
+    
+    assert len(training_data) == 1
+    prompt, output, score = training_data[0]
+    assert prompt == "What is AI?"
+    assert output == "AI is artificial intelligence..."
+    assert score == 4.0

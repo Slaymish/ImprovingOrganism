@@ -174,6 +174,14 @@ def query(request: QueryRequest):
         # Generate session ID if not provided
         session_id = request.session_id or str(uuid.uuid4())
         
+        # Augment prompt with semantic context from memory
+        semantic_context = memory.search_semantic(request.query, limit=3)
+        if semantic_context:
+            context_str = "\n".join([f"Previous related idea: {item['content']}" for item in semantic_context])
+            augmented_prompt = f"Based on the following context, answer the user's query.\n\nContext:\n{context_str}\n\nUser Query: {request.query}"
+        else:
+            augmented_prompt = request.query
+
         # Store the prompt
         memory.write(
             content=request.query,
@@ -183,7 +191,7 @@ def query(request: QueryRequest):
         
         # Generate output
         if llm:
-            output = llm.generate(request.query)
+            output = llm.generate(augmented_prompt)
             logger.info(f"LLM model used: {llm.model_name} at {llm.model_path}")
         else:
             # Mock output for development
@@ -198,7 +206,7 @@ def query(request: QueryRequest):
         )
         
         # Get recent memory for scoring context
-        recent_memory = memory.read_all()[-50:]  # Last 50 entries
+        recent_memory = memory
         
         # Score the output automatically
         auto_score = critic.score(request.query, output, recent_memory)
@@ -220,7 +228,8 @@ def query(request: QueryRequest):
                 "auto_score": auto_score,
                 "model_name": getattr(llm, 'model_name', 'mock') if llm else 'mock',
                 "model_path": getattr(llm, 'model_path', 'none') if llm else 'none',
-                "timestamp": memory.read_by_session(session_id)[-1].timestamp if memory.read_by_session(session_id) else None
+                "timestamp": memory.read_by_session(session_id)[-1].timestamp if memory.read_by_session(session_id) else None,
+                "semantic_context_used": bool(semantic_context)
             }
         }
         
@@ -680,6 +689,14 @@ def generate(prompt: Prompt):
         # Generate session ID if not provided
         session_id = prompt.session_id or str(uuid.uuid4())
         
+        # Augment with semantic context
+        semantic_context = memory.search_semantic(prompt.text, limit=3)
+        if semantic_context:
+            context_str = "\n".join([f"Previous related idea: {item['content']}" for item in semantic_context])
+            augmented_prompt = f"Based on the following context, answer the user's query.\n\nContext:\n{context_str}\n\nUser Query: {prompt.text}"
+        else:
+            augmented_prompt = prompt.text
+
         # Store the prompt
         memory.write(
             content=prompt.text,
@@ -689,7 +706,7 @@ def generate(prompt: Prompt):
         
         # Generate output
         if llm:
-            output = llm.generate(prompt.text)
+            output = llm.generate(augmented_prompt)
         else:
             # Mock output for development
             output = f"Mock response to: {prompt.text[:50]}..."
@@ -703,7 +720,7 @@ def generate(prompt: Prompt):
         )
         
         # Get recent memory for scoring context
-        recent_memory = memory.read_all()[-50:]  # Last 50 entries
+        recent_memory = memory
         
         # Score the output automatically
         auto_score = critic.score(prompt.text, output, recent_memory)
@@ -860,7 +877,7 @@ def get_detailed_score(session_id: str):
             raise HTTPException(status_code=404, detail="Incomplete session data")
         
         # Get recent memory for context
-        recent_memory = memory.read_all()[-50:]
+        recent_memory = memory
         
         # Get detailed scores
         detailed_scores = critic.get_detailed_scores(
