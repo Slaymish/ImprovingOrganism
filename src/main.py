@@ -6,6 +6,7 @@ import logging
 from .llm_wrapper import LLMWrapper
 from .memory_module import MemoryModule
 from .critic_module import CriticModule
+from .self_learning import SelfLearningModule
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -18,6 +19,7 @@ try:
     llm = LLMWrapper()
     memory = MemoryModule()
     critic = CriticModule()
+    self_learner = SelfLearningModule()
     logger.info("All components initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize components: {e}")
@@ -25,6 +27,7 @@ except Exception as e:
     llm = None
     memory = MemoryModule()
     critic = CriticModule()
+    self_learner = None
 
 class Prompt(BaseModel):
     text: str
@@ -231,3 +234,74 @@ def trigger_training():
     except Exception as e:
         logger.error(f"Training trigger failed: {e}")
         raise HTTPException(status_code=500, detail=f"Training trigger failed: {str(e)}")
+
+@app.post("/self_learning/start_session")
+def start_self_learning_session(iterations: int = 5):
+    """Start a self-learning session where the AI generates and evaluates its own responses"""
+    try:
+        if not self_learner:
+            raise HTTPException(status_code=503, detail="Self-learning module not available")
+        
+        if iterations < 1 or iterations > 20:
+            raise HTTPException(status_code=400, detail="Iterations must be between 1 and 20")
+        
+        logger.info(f"Starting self-learning session with {iterations} iterations")
+        results = self_learner.conduct_self_learning_session(iterations)
+        
+        return {
+            "status": "completed",
+            "session_id": results["session_id"],
+            "iterations_completed": iterations,
+            "average_score": round(results["average_score"], 3),
+            "best_score": round(results["best_response"]["score"], 3) if results["best_response"] else 0,
+            "improvement_trend": [round(trend, 3) for trend in results["improvement_trend"]],
+            "areas_for_focus": results["areas_for_focus"],
+            "duration_seconds": (results["end_time"] - results["start_time"]).total_seconds()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Self-learning session failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Self-learning failed: {str(e)}")
+
+@app.get("/self_learning/insights")
+def get_self_learning_insights(days_back: int = 7):
+    """Get insights from recent self-learning sessions"""
+    try:
+        if not self_learner:
+            raise HTTPException(status_code=503, detail="Self-learning module not available")
+        
+        insights = self_learner.get_learning_insights(days_back)
+        return insights
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get learning insights: {e}")
+        raise HTTPException(status_code=500, detail=f"Insights retrieval failed: {str(e)}")
+
+@app.get("/self_learning/status")
+def get_self_learning_status():
+    """Get current status of self-learning capabilities"""
+    try:
+        if not self_learner:
+            return {
+                "available": False,
+                "reason": "Self-learning module not initialized"
+            }
+        
+        # Get some basic stats about self-learning
+        recent_entries = memory.read_by_type("self_feedback", limit=10)
+        
+        return {
+            "available": True,
+            "recent_sessions": len(set(entry.session_id for entry in recent_entries if entry.session_id and "self_learning" in entry.session_id)),
+            "total_self_evaluations": len(recent_entries),
+            "knowledge_domains": len(self_learner.knowledge_domains),
+            "question_types": len(self_learner.question_types)
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get self-learning status: {e}")
+        raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")

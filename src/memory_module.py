@@ -3,6 +3,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 from typing import List, Optional
+import os
 from .config import settings
 
 Base = declarative_base()
@@ -16,6 +17,12 @@ class MemoryEntry(Base):
     session_id = Column(String(100))  # for grouping related entries
     score = Column(Float, nullable=True)  # for feedback entries
 
+# Ensure the data directory exists
+db_path = settings.db_url.replace("sqlite:///", "")
+db_dir = os.path.dirname(db_path)
+if db_dir and not os.path.exists(db_dir):
+    os.makedirs(db_dir, exist_ok=True)
+
 engine = create_engine(settings.db_url, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine)
 Base.metadata.create_all(engine)
@@ -24,7 +31,7 @@ class MemoryModule:
     def __init__(self):
         self.session = SessionLocal()
 
-    def write(self, content: str, entry_type: str = "general", session_id: Optional[str] = None, score: Optional[float] = None):
+    def write(self, content: str, entry_type: str, session_id: Optional[str] = None, score: Optional[float] = None):
         entry = MemoryEntry(
             content=content,
             entry_type=entry_type,
@@ -33,15 +40,27 @@ class MemoryModule:
         )
         self.session.add(entry)
         self.session.commit()
-        return entry.id
-
-    def read_all(self):
+    
+    def store_entry(self, content: str, entry_type: str, session_id: Optional[str] = None, score: Optional[float] = None):
+        """Alias for write method for compatibility"""
+        self.write(content, entry_type, session_id, score)
+    
+    def read_all(self) -> List[MemoryEntry]:
         return self.session.query(MemoryEntry).order_by(MemoryEntry.timestamp).all()
     
-    def read_by_type(self, entry_type: str) -> List[MemoryEntry]:
-        return self.session.query(MemoryEntry).filter(
+    def read_by_type(self, entry_type: str, limit: Optional[int] = None) -> List[MemoryEntry]:
+        query = self.session.query(MemoryEntry).filter(
             MemoryEntry.entry_type == entry_type
-        ).order_by(MemoryEntry.timestamp).all()
+        ).order_by(MemoryEntry.timestamp)
+        
+        if limit:
+            query = query.limit(limit)
+            
+        return query.all()
+    
+    def get_entries_by_type(self, entry_type: str, limit: Optional[int] = None) -> List[MemoryEntry]:
+        """Alias for read_by_type for compatibility"""
+        return self.read_by_type(entry_type, limit)
     
     def read_by_session(self, session_id: str) -> List[MemoryEntry]:
         return self.session.query(MemoryEntry).filter(

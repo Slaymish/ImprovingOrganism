@@ -5,6 +5,9 @@ A self-improving AI system that learns from feedback to enhance its responses ov
 ## 🚀 Features
 
 - **FastAPI-based REST API** for text generation and feedback collection
+- **Self-Learning System** that generates its own prompts and evaluates responses
+- **Continuous Learning** with autonomous improvement sessions
+- **Empirical Evaluation** with mathematical accuracy checking
 - **Comprehensive Scoring System** with metrics for:
   - Coherence (grammatical structure, readability)
   - Novelty (uniqueness compared to past outputs)
@@ -13,7 +16,33 @@ A self-improving AI system that learns from feedback to enhance its responses ov
 - **Memory System** with tagged entries for easy retrieval
 - **Automatic LoRA Fine-tuning** based on feedback data
 - **Session Tracking** for grouped interactions
+- **Real-time Dashboard** with self-learning insights
 - **End-to-end Demonstration** script
+
+## 🧠 Self-Learning System
+
+The system can improve autonomously through several mechanisms:
+
+### 1. **Autonomous Prompt Generation**
+- Generates diverse educational prompts across 15+ knowledge domains
+- Uses varied question types (factual, analytical, creative, problem-solving)
+- Creates contextual prompts that challenge different capabilities
+
+### 2. **Empirical Response Evaluation**
+- **Mathematical Accuracy**: Verifies calculations and mathematical expressions
+- **Logical Structure**: Checks for coherent flow and transitions
+- **Completeness**: Evaluates response depth and coverage
+- **Knowledge Consistency**: Ensures responses align with prompts and domain knowledge
+
+### 3. **Continuous Learning Loop**
+```
+Generate Prompt → Create Response → Evaluate Quality → Store Feedback → Learn
+```
+
+### 4. **Adaptive Scheduling**
+- Increases learning frequency when performance improves
+- Reduces frequency when performance plateaus or declines
+- Monitors trends and adjusts accordingly
 
 ## 📁 Project Structure
 
@@ -23,16 +52,20 @@ ImprovingOrganism/
 ├── requirements.txt
 ├── docker-compose.yml
 ├── Dockerfile
+├── dashboard.py               # Streamlit dashboard with self-learning UI
 ├── demo.py                    # End-to-end demonstration
 ├── src/
 │   ├── __init__.py
-│   ├── main.py               # FastAPI application
+│   ├── main.py               # FastAPI application with self-learning endpoints
 │   ├── llm_wrapper.py        # LLM wrapper with LoRA support
 │   ├── memory_module.py      # SQLAlchemy-based memory storage
 │   ├── critic_module.py      # Multi-metric scoring system
+│   ├── self_learning.py      # Autonomous learning and evaluation system
 │   ├── updater.py            # LoRA fine-tuning logic
 │   ├── latent_workspace.py   # Latent space management
 │   └── config.py             # Configuration settings
+├── scripts/
+│   └── continuous_learning.py # Background continuous learning service
 └── logs/                     # Log files directory
 ```
 
@@ -80,7 +113,7 @@ export DATABASE_URL="sqlite:///./memory.db"
 uvicorn src.main:app --host 0.0.0.0 --port 8000
 ```
 
-### Docker Setup (Fixed)
+### Docker Setup 
 
 **Note:** The Docker setup has been fixed for the import and dependency issues.
 
@@ -96,13 +129,6 @@ docker compose up --build
 - **`training`**: Dedicated retraining service
 
 ## 🔧 Troubleshooting
-
-### Import Errors in Docker
-
-The system now handles missing ML dependencies gracefully:
-- ✅ **Fixed**: Module import paths for Docker containers
-- ✅ **Fixed**: Pydantic version compatibility (`BaseSettings` moved to `pydantic-settings`)
-- ✅ **Added**: Fallback to mock implementations when ML libraries unavailable
 
 ### Development vs Production Mode
 
@@ -137,6 +163,66 @@ The system now handles missing ML dependencies gracefully:
 **`GET /stats`** - System statistics
 **`GET /detailed_score/{session_id}`** - Detailed scoring breakdown
 **`POST /trigger_training`** - Check training readiness
+
+### 🧠 Self-Learning
+
+**`POST /self_learning/start_session`** - Start autonomous learning session
+```bash
+curl -X POST "http://localhost:8000/self_learning/start_session?iterations=5"
+```
+
+**`GET /self_learning/insights`** - Get learning progress insights
+**`GET /self_learning/status`** - Check self-learning system status
+
+## 🤖 Using Self-Learning Features
+
+### 1. **Manual Self-Learning Session**
+Start a learning session via the API:
+```bash
+curl -X POST "http://localhost:8000/self_learning/start_session?iterations=3"
+```
+
+### 2. **Dashboard Interface**
+Use the Streamlit dashboard for interactive self-learning:
+```bash
+streamlit run dashboard.py
+```
+- Navigate to the "🧠 Self-Learning System" section
+- Adjust iteration count (1-10)
+- Click "🚀 Start Self-Learning Session"
+- View real-time progress and results
+
+### 3. **Continuous Background Learning**
+Run autonomous learning in the background:
+```bash
+# Single session
+python scripts/continuous_learning.py --single --iterations 5
+
+# Continuous learning (every 2 hours)
+python scripts/continuous_learning.py --iterations 3 --interval 2
+
+# View learning insights
+python scripts/continuous_learning.py --insights
+```
+
+### 4. **Self-Learning Workflow**
+The system automatically:
+1. **Generates diverse prompts** across knowledge domains
+2. **Creates responses** using the current model
+3. **Evaluates quality** with empirical metrics:
+   - Mathematical accuracy verification
+   - Logical structure analysis
+   - Completeness assessment
+   - Knowledge consistency checking
+4. **Stores feedback** for continuous improvement
+5. **Adapts learning schedule** based on performance trends
+
+### 5. **Monitoring Progress**
+Track learning progress through:
+- **Dashboard metrics**: Real-time session statistics
+- **API insights**: `/self_learning/insights` endpoint
+- **Log files**: `logs/self_learning.log`
+- **Database entries**: Self-learning sessions stored in memory
 
 ## 🎯 End-to-End Demonstration
 
