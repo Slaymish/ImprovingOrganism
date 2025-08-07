@@ -8,17 +8,9 @@ echo "🚀 Running ImprovingOrganism Test Suite"
 echo "========================================"
 TOP_LEVEL_DIR="."
 
-# Run unit tests
-echo "🔬 Running Unit Tests..."
-python -m unittest discover -s tests/unit -p "test_*.py" -t "$TOP_LEVEL_DIR"
-
-# Run integration tests
-echo "🔗 Running Integration Tests..."
-python -m unittest discover -s tests/integration -p "test_*.py" -t "$TOP_LEVEL_DIR"
-
-# Run end-to-end tests
-echo "🌐 Running End-to-End Tests..."
-python -m unittest discover -s tests/e2e -p "test_*.py" -t "$TOP_LEVEL_DIR"
+# Run tests with coverage
+echo "🔍 Running Tests with Coverage..."
+pytest --cov=src tests/
 
 echo "========================================"
 echo "✅ All tests passed successfully!"

@@ -1,6 +1,6 @@
 import sys
 import os
-import unittest
+import pytest
 from unittest.mock import patch, MagicMock
 import numpy as np
 
@@ -14,80 +14,89 @@ from src.updater import Updater
 from src.llm_wrapper import LLMWrapper
 from src.latent_workspace import LatentWorkspace
 
-class TestIntegration(unittest.TestCase):
-    """Test integration between modules"""
-    
-    def setUp(self):
-        """Set up integrated system"""
-        self.memory = MemoryModule()
-        self.critic = CriticModule()
-        self.updater = Updater()
-        self.llm = LLMWrapper()
-        self.workspace = LatentWorkspace(dim=256)
-    
-    def test_end_to_end_conversation(self):
-        """Test complete conversation flow"""
-        # Simulate a conversation
-        prompt = "What is machine learning?"
-        
-        # Generate response
-        response = self.llm.generate(prompt)
-        
-        # Store in memory
-        session_id = "test_session"
-        self.memory.write(prompt, entry_type="prompt", session_id=session_id)
-        self.memory.write(response, entry_type="output", session_id=session_id)
-        
-        # Score the response
-        context = [prompt]
-        score = self.critic.score(prompt, response, context)
-        
-        # Store feedback
-        self.memory.write("feedback", entry_type="feedback", session_id=session_id, score=score)
-        
-        # Check that everything worked
-        self.assertIsInstance(response, str)
-        self.assertGreater(len(response), 10)
-        self.assertIsInstance(score, float)
-        self.assertGreaterEqual(score, 0.0)
-        self.assertLessEqual(score, 5.0)
-        
-        # Check memory storage
-        entries = self.memory.read_all()
-        self.assertGreaterEqual(len(entries), 3)  # prompt, output, feedback
-    
-    def test_reasoning_with_memory(self):
-        """Test latent workspace reasoning with memory context"""
-        # Add conversation history
-        conversations = [
-            ("What is AI?", "AI is artificial intelligence..."),
-            ("How does ML work?", "Machine learning uses algorithms..."),
-            ("What about neural networks?", "Neural networks are inspired by...")
-        ]
-        
-        for i, (prompt, response) in enumerate(conversations):
-            session_id = f"conv_{i}"
-            self.memory.write(prompt, entry_type="prompt", session_id=session_id)
-            self.memory.write(response, entry_type="output", session_id=session_id)
-            
-            # Update workspace with mock embedding
-            embedding = np.random.randn(256)
-            self.workspace.update(embedding, context=f"Conversation {i}")
-        
-        # Now reason about a related question
-        question = "Tell me about AI and machine learning"
-        
-        reasoning_result = self.workspace.reason(question, reasoning_steps=3)
-        
-        # Should get a coherent response
-        self.assertIsInstance(reasoning_result, dict)
-        self.assertIn('response', reasoning_result)
-        self.assertIn('confidence', reasoning_result)
-        
-        # Update workspace with result
-        if 'embedding' in reasoning_result:
-            self.workspace.update(reasoning_result['embedding'], 
-                                context="Reasoning result", importance=0.8)
+@pytest.fixture
+def integrated_system():
+    """Fixture for integrated system"""
+    return {
+        "memory": MemoryModule(),
+        "critic": CriticModule(),
+        "updater": Updater(),
+        "llm": LLMWrapper(),
+        "workspace": LatentWorkspace(dim=256)
+    }
 
-if __name__ == '__main__':
-    unittest.main()
+def test_end_to_end_conversation(integrated_system):
+    """Test complete conversation flow"""
+    llm = integrated_system["llm"]
+    memory = integrated_system["memory"]
+    critic = integrated_system["critic"]
+    
+    # Simulate a conversation
+    prompt = "What is machine learning?"
+    
+    # Generate response
+    response = llm.generate(prompt)
+    
+    # Store in memory
+    session_id = "test_session"
+    memory.write(prompt, entry_type="prompt", session_id=session_id)
+    memory.write(response, entry_type="output", session_id=session_id)
+    
+    # Score the response
+    context = [prompt]
+    score = critic.score(prompt, response, context)
+    
+    # Store feedback
+    memory.write("feedback", entry_type="feedback", session_id=session_id, score=score)
+    
+    # Check that everything worked
+    assert isinstance(response, str)
+    assert len(response) > 10
+    assert isinstance(score, float)
+    assert 0.0 <= score <= 5.0
+    
+    # Check memory storage
+    entries = memory.read_all()
+    assert len(entries) >= 3  # prompt, output, feedback
+
+def test_reasoning_with_memory(integrated_system):
+    """Test latent workspace reasoning with memory context"""
+    memory = integrated_system["memory"]
+    workspace = integrated_system["workspace"]
+    
+    # Add some data to memory
+    memory.write("The sky is blue", entry_type="fact")
+    memory.write("The grass is green", entry_type="fact")
+    
+    # Get memory context
+    memory_context = memory.get_training_data()
+    
+    # Update workspace with memory
+    for item in memory_context:
+        embedding = workspace.llm.get_embedding(item['prompt'])
+        workspace.update(embedding, context=item['prompt'])
+    
+    # Reason about the context
+    result = workspace.reason("What color is the sky?")
+    
+    assert "blue" in result['response'].lower()
+
+def test_retraining_loop(integrated_system):
+    """Test the full feedback and retraining loop"""
+    memory = integrated_system["memory"]
+    updater = integrated_system["updater"]
+    
+    # Add some high-quality data
+    for i in range(15):
+        memory.write(f"good prompt {i}", entry_type="prompt", session_id=f"sess_{i}")
+        memory.write(f"good output {i}", entry_type="output", session_id=f"sess_{i}")
+        memory.write("feedback", entry_type="feedback", session_id=f"sess_{i}", score=4.5)
+    
+    # Get training data
+    training_data = memory.get_training_data()
+    
+    # Fine-tune the model
+    result = updater.fine_tune_lora(training_data)
+    
+    # Should indicate success
+    assert result
