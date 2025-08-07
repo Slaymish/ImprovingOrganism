@@ -23,10 +23,10 @@ class CriticModule:
         
         # Weighted combination
         final_score = (
-            0.3 * coherence_score +
-            0.25 * novelty_score +
-            0.25 * alignment_score +
-            0.2 * relevance_score
+            0.1 * coherence_score +
+            0.1 * novelty_score +
+            0.05 * alignment_score +
+            0.75 * relevance_score
         )
         
         return min(5.0, max(0.0, final_score))
@@ -139,7 +139,7 @@ class CriticModule:
         overlap = len(prompt_words & output_words)
         overlap_ratio = overlap / len(prompt_words)
         
-        base_score = 2.0 + (3.0 * overlap_ratio)
+        base_score = 1.0 + (4.0 * overlap_ratio)
         
         # Bonus for addressing question words
         question_words = {'what', 'when', 'where', 'why', 'how', 'who', 'which'}

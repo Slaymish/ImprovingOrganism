@@ -1,5 +1,5 @@
 try:
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoModelForCausalLM
     from peft import PeftModel
     import torch
     ML_AVAILABLE = True
@@ -17,6 +17,8 @@ class LLMWrapper:
             return
             
         try:
+            from transformers import AutoTokenizer, AutoModelForCausalLM
+            from peft import PeftModel
             self.tokenizer = AutoTokenizer.from_pretrained(settings.model_name)
             base_model = AutoModelForCausalLM.from_pretrained(settings.model_name, torch_dtype=torch.float16, device_map="auto")
             self.model = PeftModel.from_pretrained(base_model, settings.lora_path)
@@ -26,7 +28,7 @@ class LLMWrapper:
             self.model = None
 
     def generate(self, prompt: str, max_tokens: int = 128) -> str:
-        if not ML_AVAILABLE or self.model is None:
+        if not ML_AVAILABLE or self.model is None or self.tokenizer is None:
             # Mock response for development
             return f"Mock response to: '{prompt[:50]}...' (This is a development placeholder. Install ML dependencies for real responses.)"
             
