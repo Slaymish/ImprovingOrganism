@@ -104,9 +104,17 @@ class LLMWrapper:
                     logger.info("💻 Model loaded on CPU (memory fallback)")
                 
                 # Load LoRA adapter if it exists
-                if os.path.exists(settings.lora_path):
+                if os.path.exists(settings.lora_path) and os.path.isdir(settings.lora_path):
                     logger.info(f"✅ Found LoRA adapter at {settings.lora_path}, loading...")
-                    self.model = PeftModel.from_pretrained(base_model, settings.lora_path)
+                    try:
+                        self.model = PeftModel.from_pretrained(base_model, settings.lora_path)
+                        logger.info("🎯 LoRA adapter loaded successfully")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Failed to load LoRA adapter: {e}. Using base model.")
+                        self.model = base_model
+                elif os.path.exists(settings.lora_path) and os.path.isfile(settings.lora_path):
+                    logger.warning(f"⚠️ LoRA path is a file, not a directory: {settings.lora_path}")
+                    self.model = base_model
                 else:
                     logger.warning(f"⚠️ LoRA adapter not found at {settings.lora_path}. Using base model only.")
                     self.model = base_model
@@ -197,21 +205,28 @@ class LLMWrapper:
             # Reduce max_tokens for memory-constrained systems
             effective_max_tokens = min(max_tokens, 100) if hasattr(self.model, 'device') and 'cuda' in str(self.model.device) else max_tokens
             
-            # Generate output with memory-optimized parameters
+            # Generate output with memory-optimized parameters and timeout
             with torch.no_grad() if torch and hasattr(torch, 'no_grad') else nullcontext():
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=effective_max_tokens,
-                    min_new_tokens=10,  # Reduced minimum
-                    temperature=0.7,
-                    do_sample=True,
-                    top_p=0.9,
-                    top_k=50,
-                    repetition_penalty=1.1,
-                    use_cache=False,  # Disable caching to save memory
-                    pad_token_id=self.tokenizer.eos_token_id if hasattr(self.tokenizer, 'eos_token_id') else 0,
+                try:
+                    # Set a generation timeout using signal (Unix-only) or reduced parameters
+                    outputs = self.model.generate(
+                        **inputs,
+                        max_new_tokens=min(effective_max_tokens, 50),  # Further reduced for reliability
+                        min_new_tokens=5,  # Reduced minimum
+                        temperature=0.7,
+                        do_sample=True,
+                        top_p=0.9,
+                        top_k=50,
+                        repetition_penalty=1.1,
+                        use_cache=False,  # Disable caching to save memory
+                        pad_token_id=self.tokenizer.eos_token_id if hasattr(self.tokenizer, 'eos_token_id') else 0,
+                        early_stopping=True,  # Enable early stopping
+                    )
+                except Exception as gen_error:
+                    logger.error(f"Generation failed: {gen_error}")
+                    # Return a fallback response
+                    return f"I understand your question about '{prompt[:50]}...' but I'm experiencing technical difficulties with text generation. Please try again or rephrase your question."
                     eos_token_id=self.tokenizer.eos_token_id if hasattr(self.tokenizer, 'eos_token_id') else 0
-                )
             
             # Clear cache again after generation
             if torch and torch.cuda.is_available():

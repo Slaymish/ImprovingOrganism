@@ -514,29 +514,83 @@ def initiate_self_learning(iterations, topic=None):
         st.error(f"❌ Error starting self-learning: {str(e)}")
 
 def initiate_training_session():
-    """Start a training session"""
+    """Start a LoRA training session"""
     try:
-        with st.spinner("Starting training session..."):
+        with st.spinner("Starting LoRA training session..."):
             response = requests.post(
                 f"{API_BASE_URL}/train",
-                json={"mode": "interactive"},
+                json={"mode": "lora"},
                 timeout=30
             )
         
         if response.status_code == 200:
             result = response.json()
-            st.success("🎯 Training session initiated!")
             
-            with st.expander("🏋️ Training Details", expanded=True):
-                st.write(f"**Session ID:** {result.get('session_id', 'Unknown')}")
-                st.write(f"**Mode:** Interactive Training")
-                st.write(f"**Status:** {result.get('status', 'Active')}")
+            if result.get('status') == 'insufficient_data':
+                st.warning("⚠️ **Insufficient Training Data**")
+                st.write(f"**Message:** {result.get('message', 'Need more feedback data')}")
+                st.write(f"**Available Training Pairs:** {result.get('training_data_available', 0)}")
+                st.write(f"**Good Feedback Entries:** {result.get('good_feedback_entries', 0)}")
+                st.info("💡 " + result.get('recommendation', 'Collect more high-quality feedback before training'))
                 
+                # Option to force training
+                if st.button("🚀 Force Training (Override Data Check)"):
+                    force_training()
+            else:
+                st.success("🎯 LoRA Training Initiated!")
+                
+                with st.expander("🏋️ Training Details", expanded=True):
+                    st.write(f"**Session ID:** {result.get('session_id', 'Unknown')}")
+                    st.write(f"**Mode:** {result.get('mode', 'LoRA Training')}")
+                    st.write(f"**Status:** {result.get('status', 'Started')}")
+                    
+                    if result.get('mode') == 'lora_async':
+                        st.write(f"**Running:** Background (Async)")
+                        st.write(f"**Estimated Duration:** {result.get('estimated_duration_minutes', 'Unknown')} minutes")
+                        st.info("💡 Training is running in the background. Check training status to monitor progress.")
+                    elif result.get('mode') == 'lora_sync':
+                        st.write(f"**Running:** Foreground (Sync)")
+                        if 'training_result' in result:
+                            training_result = result['training_result']
+                            if training_result.get('status') == 'completed':
+                                st.success("✅ Training completed successfully!")
+                                st.write(f"**Training Examples:** {training_result.get('training_examples', 0)}")
+                                st.write(f"**Adapter Path:** {training_result.get('adapter_path', 'Unknown')}")
+                            else:
+                                st.error(f"❌ Training failed: {training_result.get('error', 'Unknown error')}")
+                        
         else:
-            st.error(f"❌ Failed to start training: {response.status_code}")
+            st.error(f"❌ Failed to start LoRA training: {response.status_code}")
+            try:
+                error_detail = response.json()
+                st.error(f"Details: {error_detail.get('detail', 'Unknown error')}")
+            except:
+                st.error(f"HTTP Status: {response.status_code}")
+                
+    except Exception as e:
+        st.error(f"❌ Error starting LoRA training: {str(e)}")
+
+def force_training():
+    """Force LoRA training even with insufficient data"""
+    try:
+        with st.spinner("Force starting LoRA training..."):
+            response = requests.post(
+                f"{API_BASE_URL}/train",
+                json={"mode": "lora", "force_retrain": True},
+                timeout=60
+            )
+        
+        if response.status_code == 200:
+            result = response.json()
+            st.success("🚀 Forced LoRA Training Started!")
+            
+            with st.expander("🏋️ Force Training Details", expanded=True):
+                st.json(result)
+        else:
+            st.error(f"❌ Force training failed: {response.status_code}")
             
     except Exception as e:
-        st.error(f"❌ Error starting training: {str(e)}")
+        st.error(f"❌ Error with force training: {str(e)}")
 
 def get_recent_responses(limit=10):
     """Get recent LLM responses for feedback"""
@@ -627,6 +681,258 @@ def submit_feedback(response_data, score, feedback_text):
     except Exception as e:
         st.error(f"❌ Error submitting feedback: {str(e)}")
 
+def show_training_status():
+    """Display current training status and readiness"""
+    try:
+        with st.spinner("Checking training status..."):
+            response = requests.get(f"{API_BASE_URL}/train/status", timeout=10)
+        
+        if response.status_code == 200:
+            status = response.json()
+            
+            st.success("📊 Training Status Retrieved!")
+            
+            # Main status indicators
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric(
+                    "Total Feedback", 
+                    status.get('total_feedback_entries', 0),
+                    help="All feedback entries in the system"
+                )
+            
+            with col2:
+                st.metric(
+                    "Good Feedback", 
+                    status.get('good_feedback_entries', 0),
+                    help="Feedback entries with score ≥ 3.0"
+                )
+            
+            with col3:
+                st.metric(
+                    "Training Pairs", 
+                    status.get('available_training_pairs', 0),
+                    help="Available prompt-response pairs for training"
+                )
+            
+            # Readiness status
+            if status.get('ready_for_training', False):
+                st.success("✅ **Ready for LoRA Training!** Sufficient feedback data available.")
+            else:
+                st.warning("⚠️ **More data needed** - Collect at least 10 good feedback entries before training.")
+            
+            # Technical details
+            with st.expander("🔧 Technical Details"):
+                st.json(status)
+                
+        else:
+            st.error(f"❌ Failed to get training status: {response.status_code}")
+            
+    except Exception as e:
+        st.error(f"❌ Error checking training status: {str(e)}")
+
+def show_training_history():
+    """Display training session history"""
+    try:
+        with st.spinner("Loading training history..."):
+            response = requests.get(f"{API_BASE_URL}/train/history", timeout=10)
+        
+        if response.status_code == 200:
+            history_data = response.json()
+            history = history_data.get('training_history', [])
+            
+            if history:
+                st.success(f"📈 Training History ({len(history)} entries)")
+                
+                # Display history as a table
+                history_df = pd.DataFrame(history)
+                
+                # Format timestamp
+                if 'timestamp' in history_df.columns:
+                    history_df['timestamp'] = pd.to_datetime(history_df['timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
+                
+                st.dataframe(
+                    history_df,
+                    use_container_width=True,
+                    hide_index=True
+                )
+                
+                # Show detailed view for recent sessions
+                with st.expander("🔍 Detailed Session Info"):
+                    for i, session in enumerate(history[:5]):  # Show last 5 sessions
+                        st.write(f"**Session {i+1}:** {session.get('session_id', 'Unknown')}")
+                        st.write(f"- **Time:** {session.get('timestamp', 'Unknown')}")
+                        st.write(f"- **Type:** {session.get('type', 'Unknown')}")
+                        st.write(f"- **Status:** {session.get('content', 'No details')}")
+                        st.write(f"- **Score:** {session.get('score', 'N/A')}")
+                        st.divider()
+            else:
+                st.info("📭 No training history available yet.")
+                
+        else:
+            st.error(f"❌ Failed to get training history: {response.status_code}")
+            
+    except Exception as e:
+        st.error(f"❌ Error loading training history: {str(e)}")
+
+def validate_adapter():
+    """Validate current adapter for model collapse and knowledge retention"""
+    with st.spinner("Running adapter validation tests..."):
+        try:
+            response = requests.get(f"{API_BASE}/train/validate", timeout=60)
+            
+            if response.status_code == 200:
+                result = response.json()
+                
+                if result.get("status") == "completed":
+                    st.success("✅ Adapter validation completed!")
+                    
+                    health_summary = result.get("health_summary", {})
+                    
+                    # Display key metrics
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        overall_health = health_summary.get("overall_health", "unknown")
+                        if overall_health == "healthy":
+                            st.success(f"🟢 **Health:** {overall_health.title()}")
+                        elif overall_health == "acceptable":
+                            st.warning(f"🟡 **Health:** {overall_health.title()}")
+                        else:
+                            st.error(f"🔴 **Health:** {overall_health.title()}")
+                    
+                    with col2:
+                        knowledge_retained = health_summary.get("knowledge_retained", False)
+                        if knowledge_retained:
+                            st.success("🧠 **Knowledge:** ✅ Retained")
+                        else:
+                            st.error("🧠 **Knowledge:** ❌ Lost")
+                    
+                    with col3:
+                        diversity_score = health_summary.get("diversity_score", 0) * 100
+                        if diversity_score > 60:
+                            st.success(f"🎨 **Diversity:** {diversity_score:.1f}%")
+                        elif diversity_score > 40:
+                            st.warning(f"🎨 **Diversity:** {diversity_score:.1f}%")
+                        else:
+                            st.error(f"🎨 **Diversity:** {diversity_score:.1f}%")
+                    
+                    # Show detailed validation results
+                    with st.expander("📊 Detailed Validation Results"):
+                        validation_result = result.get("validation_result", {})
+                        
+                        # Knowledge retention details
+                        knowledge_tests = validation_result.get("knowledge_retention", {})
+                        if knowledge_tests:
+                            st.write("**Knowledge Retention Tests:**")
+                            gk_tests = knowledge_tests.get("general_knowledge", [])
+                            passed = sum(1 for test in gk_tests if test.get("passed", False))
+                            st.write(f"General Knowledge: {passed}/{len(gk_tests)} passed")
+                            
+                            reasoning_tests = knowledge_tests.get("reasoning", [])
+                            reasoning_passed = sum(1 for test in reasoning_tests if test.get("passed", False))
+                            st.write(f"Reasoning: {reasoning_passed}/{len(reasoning_tests)} passed")
+                        
+                        # Diversity metrics
+                        diversity_metrics = validation_result.get("diversity_metrics", {})
+                        if diversity_metrics:
+                            st.write("**Diversity Metrics:**")
+                            for metric, value in diversity_metrics.items():
+                                if isinstance(value, float):
+                                    st.write(f"{metric.replace('_', ' ').title()}: {value:.3f}")
+                    
+                    # Show recommendations
+                    recommendations = result.get("actionable_recommendations", [])
+                    if recommendations:
+                        st.warning("💡 **Recommendations:**")
+                        for rec in recommendations:
+                            st.write(f"• {rec}")
+                    
+                    # Safety assessment
+                    safe_for_use = health_summary.get("safe_for_continued_use", False)
+                    if safe_for_use:
+                        st.success("✅ **Assessment:** Safe for continued use")
+                    else:
+                        st.error("⚠️ **Assessment:** Use with caution or consider retraining")
+                
+                else:
+                    st.error(f"❌ Validation failed: {result.get('message', 'Unknown error')}")
+            else:
+                st.error(f"❌ Validation request failed: {response.status_code}")
+                
+        except requests.exceptions.Timeout:
+            st.error("⏱️ Validation timed out - this may indicate model loading issues")
+        except Exception as e:
+            st.error(f"❌ Validation error: {str(e)}")
+
+def start_advanced_training(min_score: float, max_samples: int, force_retrain: bool):
+    """Start advanced LoRA training with custom parameters"""
+    try:
+        payload = {
+            "mode": "lora",
+            "min_feedback_score": min_score,
+            "max_samples": max_samples,
+            "force_retrain": force_retrain
+        }
+        
+        with st.spinner("Initiating advanced LoRA training... This may take several minutes."):
+            response = requests.post(
+                f"{API_BASE_URL}/train",
+                json=payload,
+                timeout=600  # 10 minutes timeout for training
+            )
+        
+        if response.status_code == 200:
+            result = response.json()
+            
+            if result.get('status') == 'insufficient_data' and not force_retrain:
+                st.warning("⚠️ **Insufficient Training Data**")
+                st.write(f"**Message:** {result.get('message', 'Need more feedback')}")
+                st.info("💡 Enable 'Force Training' to override this check")
+            else:
+                st.success("🎉 Advanced LoRA Training Initiated!")
+                
+                # Display training results
+                with st.expander("📋 Training Results", expanded=True):
+                    if result.get('status') == 'completed':
+                        st.success(f"✅ **Training Status:** {result.get('status', 'Unknown')}")
+                        
+                        training_result = result.get('training_result', {})
+                        if training_result:
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("Training Examples", training_result.get('training_examples', 0))
+                            with col2:
+                                st.metric("Training Loss", f"{training_result.get('training_loss', 0):.4f}")
+                            with col3:
+                                st.metric("Duration (min)", f"{training_result.get('training_time_minutes', 0):.1f}")
+                            
+                            st.info(f"🎯 **Adapter saved to:** {training_result.get('adapter_path', 'Unknown')}")
+                            
+                    elif result.get('status') == 'started':
+                        st.info(f"� **Training Status:** Started in background")
+                        st.write(f"**Session ID:** {result.get('session_id')}")
+                        st.write(f"**Mode:** {result.get('mode', 'LoRA')}")
+                        st.write(f"**Estimated Duration:** {result.get('estimated_duration_minutes', 'Unknown')} minutes")
+                        st.info("💡 Training is running in the background. Check training status to monitor progress.")
+                    else:
+                        st.error(f"❌ Training failed: {result.get('message', 'Unknown error')}")
+                
+        else:
+            st.error(f"❌ Advanced LoRA training failed: {response.status_code}")
+            try:
+                error_detail = response.json()
+                st.error(f"Details: {error_detail.get('detail', 'Unknown error')}")
+            except:
+                st.error(f"HTTP Status: {response.status_code}")
+                
+    except requests.exceptions.Timeout:
+        st.error("⏱️ Training request timed out. The training may still be running in the background.")
+        st.info("💡 Check the training history to see if the session completed.")
+    except Exception as e:
+        st.error(f"❌ Error starting advanced LoRA training: {str(e)}")
+
 def main():
     # Header
     st.title("AI Learning System Research Analytics")
@@ -702,6 +1008,70 @@ def main():
         with col2:
             if st.button("🎯 Start Training"):
                 initiate_training_session()
+        
+        # Advanced LoRA Training section with Safeguards
+        st.divider()
+        st.subheader("🛡️ LoRA Training with Safeguards")
+        
+        # Display training health status
+        try:
+            health_response = requests.get(f"{API_BASE}/train/health")
+            if health_response.status_code == 200:
+                health_data = health_response.json()
+                system_health = health_data.get("system_health", "unknown")
+                
+                if system_health == "healthy":
+                    st.success("🟢 Training System: Healthy")
+                elif system_health == "concerning":
+                    st.warning("🟡 Training System: Some Concerns")
+                elif system_health == "unhealthy":
+                    st.error("🔴 Training System: Issues Detected")
+                else:
+                    st.info("⚪ Training System: Status Unknown")
+                
+                # Show issues and recommendations
+                issues = health_data.get("issues", [])
+                recommendations = health_data.get("recommendations", [])
+                
+                if issues or recommendations:
+                    with st.expander("⚠️ Health Details"):
+                        if issues:
+                            st.write("**Issues:**")
+                            for issue in issues:
+                                st.write(f"• {issue}")
+                        if recommendations:
+                            st.write("**Recommendations:**")
+                            for rec in recommendations:
+                                st.write(f"• {rec}")
+        except:
+            st.warning("Could not fetch training health status")
+        
+        # Training status with enhanced metrics
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📊 Check Training Status", use_container_width=True):
+                show_training_status()
+        
+        with col2:
+            if st.button("� Validate Current Adapter", use_container_width=True):
+                validate_adapter()
+        
+        # Enhanced training controls with safeguards
+        with st.expander("🔬 Advanced LoRA Training Options (with Safeguards)", expanded=False):
+            st.info("🛡️ **Safeguards Active:** This training includes knowledge retention testing, "
+                   "output diversity monitoring, conservative learning rates, and automatic adapter versioning.")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                min_score = st.slider("Minimum Feedback Score", 1.0, 5.0, 3.0, 0.5)
+                max_samples = st.number_input("Max Training Samples", 50, 1000, 500, 50)
+            
+            with col2:
+                force_retrain = st.checkbox("Force Training (override safety checks)")
+                st.warning("⚠️ Force training bypasses data quality and safety checks")
+                
+            if st.button("🚀 Start Safeguarded LoRA Training", use_container_width=True, type="primary"):
+                start_advanced_training(min_score, max_samples, force_retrain)
         
         # Feedback section
         st.divider()

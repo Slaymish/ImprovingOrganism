@@ -3,10 +3,12 @@ from pydantic import BaseModel
 from typing import Optional, Union
 import uuid
 import logging
+from datetime import datetime
 from .llm_wrapper import LLMWrapper
 from .memory_module import MemoryModule
 from .critic_module import CriticModule
 from .self_learning import SelfLearningModule
+from .lora_trainer import LoRATrainer
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -16,18 +18,43 @@ app = FastAPI(title="ImprovingOrganism API", version="1.0.0")
 
 # Initialize components
 try:
-    llm = LLMWrapper()
     memory = MemoryModule()
     critic = CriticModule()
-    self_learner = SelfLearningModule()
-    logger.info("All components initialized successfully")
+    logger.info("Core components (memory, critic) initialized")
+    
+    # Initialize LLM in a separate step (this takes time)
+    try:
+        logger.info("Loading LLM wrapper...")
+        llm = LLMWrapper()
+        logger.info("LLM wrapper initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize LLM wrapper: {e}")
+        llm = None
+    
+    # Initialize optional components with individual error handling
+    try:
+        self_learner = SelfLearningModule()
+        logger.info("Self-learner initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize self-learner: {e}")
+        self_learner = None
+    
+    try:
+        lora_trainer = LoRATrainer()
+        logger.info("LoRA trainer initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize LoRA trainer: {e}")
+        lora_trainer = None
+        
+    logger.info("All components initialization completed")
 except Exception as e:
-    logger.error(f"Failed to initialize components: {e}")
+    logger.error(f"Failed to initialize core components: {e}", exc_info=True)
     # Create mock components for development
     llm = None
     memory = MemoryModule()
     critic = CriticModule()
     self_learner = None
+    lora_trainer = None
 
 class Prompt(BaseModel):
     text: str
@@ -54,8 +81,11 @@ class SelfLearnRequest(BaseModel):
     topic: Optional[str] = None
 
 class TrainRequest(BaseModel):
-    mode: str = "interactive"
+    mode: str = "lora"  # Always LoRA training
     session_id: Optional[str] = None
+    min_feedback_score: Optional[float] = 3.0
+    max_samples: Optional[int] = 500
+    force_retrain: Optional[bool] = False
 
 class FeedbackRequest(BaseModel):
     response_id: str
@@ -66,6 +96,76 @@ class FeedbackRequest(BaseModel):
 @app.get("/")
 def root():
     return {"message": "ImprovingOrganism API", "status": "running"}
+
+@app.get("/health")
+def health_check():
+    """Comprehensive health check of all components"""
+    health_status = {
+        "api": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "components": {
+            "llm": llm is not None,
+            "memory": memory is not None,
+            "critic": critic is not None,
+            "self_learner": self_learner is not None,
+            "lora_trainer": lora_trainer is not None
+        },
+        "details": {
+            "llm_status": "loaded" if llm else "not_available",
+            "memory_entries": len(memory.read_all()) if memory else 0,
+            "ml_available": getattr(lora_trainer, 'lora_config', None) is not None if lora_trainer else False
+        }
+    }
+    
+    # Overall system health
+    critical_components = ["memory", "critic"]
+    optional_components = ["llm", "self_learner", "lora_trainer"]
+    
+    critical_healthy = all(health_status["components"][comp] for comp in critical_components)
+    optional_healthy = sum(health_status["components"][comp] for comp in optional_components)
+    
+    if critical_healthy:
+        if optional_healthy >= 2:
+            health_status["overall"] = "healthy"
+        elif optional_healthy >= 1:
+            health_status["overall"] = "degraded"
+        else:
+            health_status["overall"] = "limited"
+    else:
+        health_status["overall"] = "unhealthy"
+    
+    return health_status
+
+@app.post("/query/simple")
+def simple_query(request: QueryRequest):
+    """Simple query endpoint that returns a fast mock response for testing"""
+    session_id = request.session_id or str(uuid.uuid4())
+    
+    # Store the prompt
+    memory.write(
+        content=request.query,
+        entry_type="prompt",
+        session_id=session_id
+    )
+    
+    # Return a quick mock response
+    response = f"Quick test response to: {request.query}"
+    
+    # Store the output
+    memory.write(
+        content=response,
+        entry_type="output",
+        session_id=session_id
+    )
+    
+    return {
+        "response": response,
+        "session_id": session_id,
+        "metadata": {
+            "mode": "simple_test",
+            "timestamp": datetime.now().isoformat()
+        }
+    }
 
 @app.post("/query")
 def query(request: QueryRequest):
@@ -246,37 +346,332 @@ def get_self_learning_status(session_id: str):
 
 @app.post("/train")
 def train(request: TrainRequest):
-    """Start a training session"""
+    """Start LoRA training using feedback data"""
     try:
+        if not lora_trainer:
+            raise HTTPException(status_code=503, detail="LoRA trainer not available")
+        
         session_id = request.session_id or str(uuid.uuid4())
         
-        logger.info(f"Starting training session {session_id} in {request.mode} mode")
+        logger.info(f"Starting LoRA training session {session_id}")
         
-        # Get training data from memory
-        feedback_entries = memory.get_feedback_entries()
-        training_data = memory.get_training_data()
+        # Check if we have enough training data (unless forced)
+        training_status = lora_trainer.get_training_status()
         
-        # Store training session start
-        memory.write(
-            content=f"TRAINING_SESSION_START: mode={request.mode}",
-            entry_type="training",
-            session_id=session_id
-        )
+        # Log data quality warnings
+        data_quality = training_status.get("data_quality", {})
+        if data_quality.get("issues"):
+            logger.warning(f"Data quality issues detected: {data_quality['issues']}")
         
-        # For now, simulate training preparation
-        # In a real implementation, this would trigger actual model training
+        if not request.force_retrain and not training_status.get("ready_for_training", False):
+            return {
+                "status": "insufficient_data",
+                "session_id": session_id,
+                "message": f"Insufficient training data. Need at least 10 good feedback entries, have {training_status.get('good_feedback_entries', 0)}",
+                "training_data_available": training_status.get("available_training_pairs", 0),
+                "good_feedback_entries": training_status.get("good_feedback_entries", 0),
+                "data_quality": data_quality,
+                "recommendation": "Collect more feedback with scores >= 3.0 before training",
+                "suggestion": "Set force_retrain=true to override this check"
+            }
+        
+        # Determine if we should run training synchronously or asynchronously
+        # For small datasets, run synchronously; for larger ones, run async
+        should_run_async = training_status.get("available_training_pairs", 0) > 100
+        
+        if should_run_async:
+            # Start LoRA training in background for large datasets
+            import threading
+            
+            def run_lora_training():
+                try:
+                    logger.info(f"Starting async LoRA training with min_score={request.min_feedback_score}, max_samples={request.max_samples}")
+                    
+                    training_result = lora_trainer.train_lora(
+                        min_feedback_score=request.min_feedback_score,
+                        max_samples=request.max_samples,
+                        force_training=request.force_retrain
+                    )
+                    
+                    # Store training completion status
+                    memory.write(
+                        content=f"LORA_TRAINING_SESSION_COMPLETED: {session_id} - status: {training_result.get('status')}",
+                        entry_type="training_session",
+                        session_id=session_id,
+                        score=5.0 if training_result.get('status') == 'completed' else 0.0
+                    )
+                    
+                    logger.info(f"Async LoRA training session {session_id} completed with status: {training_result.get('status')}")
+                    
+                except Exception as e:
+                    logger.error(f"Async LoRA training session {session_id} failed: {e}")
+                    memory.write(
+                        content=f"LORA_TRAINING_SESSION_FAILED: {session_id} - error: {str(e)}",
+                        entry_type="training_session",
+                        session_id=session_id,
+                        score=0.0
+                    )
+            
+            # Start training in background thread
+            training_thread = threading.Thread(target=run_lora_training)
+            training_thread.daemon = True
+            training_thread.start()
+            
+            return {
+                "status": "started",
+                "session_id": session_id,
+                "mode": "lora_async",
+                "training_data_available": training_status.get("available_training_pairs", 0),
+                "good_feedback_entries": training_status.get("good_feedback_entries", 0),
+                "message": f"LoRA training started in background with {training_status.get('available_training_pairs', 0)} training pairs",
+                "estimated_duration_minutes": max(5, training_status.get("available_training_pairs", 0) * 0.1),
+                "check_status_url": f"/train/status/{session_id}"
+            }
+        else:
+            # Run training synchronously for small datasets
+            logger.info(f"Starting synchronous LoRA training with min_score={request.min_feedback_score}, max_samples={request.max_samples}")
+            
+            training_result = lora_trainer.train_lora(
+                min_feedback_score=request.min_feedback_score,
+                max_samples=request.max_samples,
+                force_training=request.force_retrain
+            )
+            
+            # Store result
+            memory.write(
+                content=f"LORA_TRAINING_SYNC: status={training_result.get('status')}, examples={training_result.get('training_examples', 0)}",
+                entry_type="training_session",
+                session_id=session_id,
+                score=5.0 if training_result.get('status') == 'completed' else 0.0
+            )
+            
+            return {
+                "status": training_result.get('status', 'unknown'),
+                "session_id": session_id,
+                "mode": "lora_sync", 
+                "training_result": training_result,
+                "training_status": training_status
+            }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"LoRA training session failed: {e}")
+        raise HTTPException(status_code=500, detail=f"LoRA training failed: {str(e)}")
+
+@app.get("/train/validate")
+def validate_current_adapter():
+    """Validate the current LoRA adapter for model collapse and knowledge retention"""
+    try:
+        if not lora_trainer:
+            raise HTTPException(status_code=503, detail="LoRA trainer not available")
+        
+        logger.info("Starting current adapter validation...")
+        
+        validation_result = lora_trainer.validate_current_adapter()
+        
+        if "error" in validation_result:
+            return {
+                "status": "error",
+                "message": validation_result["error"],
+                "recommendation": "Check if adapter exists and is properly configured"
+            }
+        
+        # Add actionable recommendations based on validation results
+        overall_health = validation_result.get("overall_health", "unknown")
+        recommendations = validation_result.get("recommendations", [])
+        
+        if overall_health == "unhealthy":
+            recommendations.extend([
+                "Consider reverting to a previous adapter version",
+                "Collect more diverse training data",
+                "Review feedback quality before next training"
+            ])
+        elif overall_health == "concerning":
+            recommendations.extend([
+                "Monitor next few training cycles carefully",
+                "Focus on improving training data diversity"
+            ])
+        
         return {
-            "status": "Active",
-            "session_id": session_id,
-            "mode": request.mode,
-            "training_data_available": len(training_data),
-            "feedback_entries": len(feedback_entries),
-            "message": f"Training session initiated with {len(training_data)} training pairs"
+            "status": "completed",
+            "validation_result": validation_result,
+            "actionable_recommendations": recommendations,
+            "health_summary": {
+                "overall_health": overall_health,
+                "knowledge_retained": validation_result.get("knowledge_retention", {}).get("passed", False),
+                "diversity_score": validation_result.get("diversity_metrics", {}).get("overall_diversity", 0),
+                "safe_for_continued_use": overall_health in ["healthy", "acceptable"]
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Adapter validation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
+
+@app.get("/train/health")
+def get_training_health():
+    """Get comprehensive training system health metrics"""
+    try:
+        if not lora_trainer:
+            return {"error": "LoRA trainer not available"}
+        
+        # Get training status with health metrics
+        status = lora_trainer.get_training_status()
+        
+        # Get adapter health
+        adapter_health = status.get("adapter_health", {})
+        data_quality = status.get("data_quality", {})
+        
+        # Determine overall system health
+        system_health = "healthy"
+        issues = []
+        recommendations = []
+        
+        # Check adapter health
+        if adapter_health.get("status") == "unhealthy":
+            system_health = "unhealthy"
+            issues.append("Current adapter shows signs of degradation")
+            recommendations.append("Validate or retrain current adapter")
+        elif adapter_health.get("status") == "concerning":
+            system_health = "concerning"
+            issues.append("Current adapter may have some issues")
+        
+        # Check data quality
+        if data_quality.get("score", 0) < 0.5:
+            if system_health == "healthy":
+                system_health = "concerning"
+            issues.append("Poor training data quality detected")
+            recommendations.extend(data_quality.get("issues", []))
+        
+        # Check training readiness
+        if not status.get("ready_for_training", False):
+            recommendations.append("Collect more high-quality feedback")
+        
+        return {
+            "system_health": system_health,
+            "training_status": status,
+            "issues": issues,
+            "recommendations": recommendations,
+            "safeguards_active": True,
+            "last_updated": datetime.now().isoformat()
         }
         
     except Exception as e:
-        logger.error(f"Training session failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Training failed: {str(e)}")
+        logger.error(f"Failed to get training health: {e}")
+        return {"error": str(e)}
+
+@app.get("/train/status")
+def get_training_status():
+    """Get current LoRA training status and readiness"""
+    try:
+        if not lora_trainer:
+            return {"error": "LoRA trainer not available", "ml_available": False}
+        
+        return lora_trainer.get_training_status()
+        
+    except Exception as e:
+        logger.error(f"Failed to get training status: {e}")
+        raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")
+
+@app.get("/train/status/{session_id}")
+def get_training_session_status(session_id: str):
+    """Get status of a specific LoRA training session"""
+    try:
+        # Check for training session entries in memory
+        session_entries = memory.read_by_session(session_id)
+        
+        if not session_entries:
+            raise HTTPException(status_code=404, detail="Training session not found")
+        
+        # Find the latest training status
+        training_entry = None
+        for entry in reversed(session_entries):
+            if entry.entry_type == "training_session":
+                training_entry = entry
+                break
+        
+        if training_entry:
+            if "COMPLETED" in training_entry.content:
+                return {
+                    "status": "completed",
+                    "session_id": session_id,
+                    "message": "LoRA training completed successfully",
+                    "details": training_entry.content,
+                    "score": training_entry.score
+                }
+            elif "FAILED" in training_entry.content:
+                return {
+                    "status": "failed", 
+                    "session_id": session_id,
+                    "message": "LoRA training failed",
+                    "error": training_entry.content
+                }
+            elif "SYNC" in training_entry.content:
+                return {
+                    "status": "completed",
+                    "session_id": session_id,
+                    "message": "Synchronous LoRA training completed",
+                    "details": training_entry.content,
+                    "score": training_entry.score
+                }
+            else:
+                return {
+                    "status": "in_progress",
+                    "session_id": session_id,
+                    "message": "LoRA training in progress",
+                    "details": training_entry.content
+                }
+        else:
+            return {
+                "status": "not_found",
+                "session_id": session_id,
+                "message": "No training session found with this ID"
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get training session status: {e}")
+        raise HTTPException(status_code=500, detail=f"Session status check failed: {str(e)}")
+
+@app.get("/train/history")
+def get_training_history(limit: int = 10):
+    """Get history of training sessions"""
+    try:
+        training_sessions = memory.read_by_type("training_session", limit=limit)
+        training_results = memory.read_by_type("training_result", limit=limit)
+        
+        history = []
+        
+        for session in training_sessions:
+            history.append({
+                "session_id": session.session_id,
+                "timestamp": session.timestamp.isoformat(),
+                "content": session.content,
+                "score": session.score,
+                "type": "session"
+            })
+        
+        for result in training_results:
+            history.append({
+                "session_id": result.session_id,
+                "timestamp": result.timestamp.isoformat(),
+                "content": result.content,
+                "score": result.score,
+                "type": "result"
+            })
+        
+        # Sort by timestamp
+        history.sort(key=lambda x: x["timestamp"], reverse=True)
+        
+        return {"training_history": history[:limit]}
+        
+    except Exception as e:
+        logger.error(f"Failed to get training history: {e}")
+        raise HTTPException(status_code=500, detail=f"History retrieval failed: {str(e)}")
 
 @app.post("/generate", response_model=GenerationResponse)
 def generate(prompt: Prompt):

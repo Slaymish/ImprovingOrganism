@@ -19,7 +19,13 @@ logger = logging.getLogger(__name__)
 
 class SelfLearningModule:
     def __init__(self):
-        self.llm = LLMWrapper()
+        try:
+            self.llm = LLMWrapper()
+            logger.info("LLM wrapper initialized successfully for self-learning")
+        except Exception as e:
+            logger.warning(f"Failed to initialize LLM wrapper for self-learning: {e}")
+            self.llm = None
+            
         self.memory = MemoryModule()
         self.session_id = f"self_learning_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
@@ -295,6 +301,13 @@ class SelfLearningModule:
 
     def conduct_self_learning_session(self, num_iterations: int = 5) -> Dict:
         """Conduct a self-learning session with multiple prompt-response cycles"""
+        if not self.llm:
+            return {
+                "error": "LLM not available for self-learning",
+                "session_id": self.session_id,
+                "status": "failed"
+            }
+            
         session_results = {
             "session_id": self.session_id,
             "start_time": datetime.now(),
@@ -437,6 +450,13 @@ class SelfLearningModule:
 
     def conduct_focused_learning_session(self, num_iterations: int, topic: str) -> Dict:
         """Conduct a self-learning session focused on a specific topic"""
+        if not self.llm:
+            return {
+                "error": "LLM not available for focused learning",
+                "session_id": f"{self.session_id}_focused_{topic[:20]}",
+                "status": "failed"
+            }
+            
         session_results = {
             "session_id": f"{self.session_id}_focused_{topic[:20]}",
             "start_time": datetime.now(),
