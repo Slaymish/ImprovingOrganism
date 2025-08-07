@@ -1,37 +1,137 @@
+import os
+import logging
+from typing import Optional, Union
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Import guards for optional ML dependencies
 try:
-    from transformers import AutoModelForCausalLM
-    from peft import PeftModel
     import torch
+    from transformers import AutoTokenizer, AutoModelForCausalLM
+    from peft import PeftModel
     ML_AVAILABLE = True
 except ImportError:
     ML_AVAILABLE = False
+    torch = None
     
+    # Define mock classes for when ML dependencies are not available
+    class MockTokenizer:
+        def __init__(self, *args, **kwargs): 
+            self.eos_token_id = 0
+        
+        @classmethod
+        def from_pretrained(cls, *args, **kwargs): 
+            return cls()
+        
+        def __call__(self, *args, **kwargs): 
+            return {'input_ids': [[1, 2, 3]], 'attention_mask': [[1, 1, 1]]}
+        
+        def decode(self, *args, **kwargs): 
+            return "Mock response"
+
+    class MockModel:
+        def __init__(self, *args, **kwargs): 
+            self.device = "cpu"
+        
+        @classmethod
+        def from_pretrained(cls, *args, **kwargs): 
+            return cls()
+        
+        def generate(self, *args, **kwargs): 
+            return [[1, 2, 3, 4, 5]]
+
+    AutoTokenizer = MockTokenizer
+    AutoModelForCausalLM = MockModel
+    PeftModel = MockModel
+
 from .config import settings
 
 class LLMWrapper:
     def __init__(self):
-        if not ML_AVAILABLE:
-            print("⚠️  ML dependencies not available. Using mock LLM for development.")
-            self.tokenizer = None
-            self.model = None
-            return
+        self.model: Optional[PeftModel] = None
+        self.tokenizer: Optional[AutoTokenizer] = None
+        
+        if ML_AVAILABLE:
+            try:
+                self.tokenizer = AutoTokenizer.from_pretrained(settings.model_name)
+                base_model = AutoModelForCausalLM.from_pretrained(
+                    settings.model_name, 
+                    torch_dtype=torch.float16 if torch else None, 
+                    device_map="auto"
+                )
+                
+                # Load LoRA adapter if it exists
+                if os.path.exists(settings.lora_path):
+                    logger.info(f"✅ Found LoRA adapter at {settings.lora_path}, loading...")
+                    self.model = PeftModel.from_pretrained(base_model, settings.lora_path)
+                else:
+                    logger.warning(f"⚠️ LoRA adapter not found at {settings.lora_path}. Using base model only.")
+                    self.model = base_model
+                    
+            except Exception as e:
+                logger.error(f"Failed to load ML model: {e}", exc_info=True)
+                # Fall back to mock mode
+                self.tokenizer = AutoTokenizer()
+                self.model = AutoModelForCausalLM()
+        else:
+            logger.warning("ML dependencies not available. Running in mock mode.")
+            self.tokenizer = AutoTokenizer()
+            self.model = AutoModelForCausalLM()
+
+    def generate(self, prompt: str, max_tokens: int = 150) -> str:
+        if not ML_AVAILABLE or self.model is None or self.tokenizer is None:
+            # Mock generation for development
+            mock_response = (
+                f"This is a mock response to the prompt: '{prompt[:50]}...'. "
+                "The actual machine learning models are not available. "
+                "This allows for development and testing of the application's "
+                "other components without requiring a GPU."
+            )
+            return mock_response
             
         try:
-            from transformers import AutoTokenizer, AutoModelForCausalLM
-            from peft import PeftModel
-            self.tokenizer = AutoTokenizer.from_pretrained(settings.model_name)
-            base_model = AutoModelForCausalLM.from_pretrained(settings.model_name, torch_dtype=torch.float16, device_map="auto")
-            self.model = PeftModel.from_pretrained(base_model, settings.lora_path)
-        except Exception as e:
-            print(f"⚠️  Failed to load ML model: {e}. Using mock mode.")
-            self.tokenizer = None
-            self.model = None
-
-    def generate(self, prompt: str, max_tokens: int = 128) -> str:
-        if not ML_AVAILABLE or self.model is None or self.tokenizer is None:
-            # Mock response for development
-            return f"Mock response to: '{prompt[:50]}...' (This is a development placeholder. Install ML dependencies for real responses.)"
+            # Prepare input
+            inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
             
-        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
-        outputs = self.model.generate(**inputs, max_new_tokens=max_tokens)
-        return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            # Generate output
+            outputs = self.model.generate(
+                **inputs, 
+                max_new_tokens=max_tokens,
+                eos_token_id=self.tokenizer.eos_token_id
+            )
+            
+            # Decode and return
+            response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error during text generation: {e}", exc_info=True)
+            return "Error: Could not generate response."
+
+    def get_embeddings(self, text: str):
+        """Get embeddings for the given text"""
+        if not ML_AVAILABLE or self.model is None or self.tokenizer is None:
+            # Mock embeddings for development
+            logger.info("Generating mock embeddings.")
+            import numpy as np
+            return np.random.rand(768)  # Common embedding size
+            
+        try:
+            inputs = self.tokenizer(text, return_tensors="pt", padding=True, truncation=True)
+            if torch and hasattr(torch, 'no_grad'):
+                with torch.no_grad():
+                    outputs = self.model.base_model(**inputs, output_hidden_states=True)
+            else:
+                outputs = self.model.base_model(**inputs, output_hidden_states=True)
+            
+            # Use the last hidden state as the embedding
+            embeddings = outputs.hidden_states[-1].mean(dim=1).squeeze()
+            return embeddings.cpu().numpy()
+            
+        except Exception as e:
+            logger.error(f"Error generating embeddings: {e}", exc_info=True)
+            import numpy as np
+            return np.random.rand(768)  # Fallback to mock
+            return None
