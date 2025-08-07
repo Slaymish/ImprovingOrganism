@@ -11,3 +11,7 @@ weaviate-client
 datasets
 accelerate
 bitsandbytes
+streamlit
+plotly
+pandas
+requests

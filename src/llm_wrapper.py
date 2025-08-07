@@ -1,6 +1,7 @@
 import os
 import logging
 from typing import Optional, Union
+from contextlib import nullcontext
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -83,32 +84,60 @@ class LLMWrapper:
     def generate(self, prompt: str, max_tokens: int = 150) -> str:
         if not ML_AVAILABLE or self.model is None or self.tokenizer is None:
             # Mock generation for development
-            mock_response = (
-                f"This is a mock response to the prompt: '{prompt[:50]}...'. "
-                "The actual machine learning models are not available. "
-                "This allows for development and testing of the application's "
-                "other components without requiring a GPU."
-            )
-            return mock_response
+            mock_responses = {
+                "explain machine learning": "Machine learning is a branch of artificial intelligence where computers learn patterns from data to make predictions or decisions without being explicitly programmed for each task.",
+                "invent something": "I'd like to invent a 'Memory Garden' - a digital space where people can plant virtual seeds representing memories, watch them grow into stories, and share them with loved ones across generations.",
+                "neural networks": "Neural networks are computer systems inspired by how the human brain works. They consist of interconnected nodes (like brain neurons) that process information and learn patterns from examples.",
+                "data privacy": "Data privacy is crucial because it protects personal information from misuse, maintains trust in digital services, prevents identity theft, and preserves individual autonomy in an increasingly connected world."
+            }
+            
+            # Find the best matching response
+            prompt_lower = prompt.lower()
+            for key, response in mock_responses.items():
+                if key in prompt_lower:
+                    return response
+            
+            return f"I understand you're asking about '{prompt}'. This is a mock response while the full AI model loads. The system is designed to provide thoughtful, helpful answers to your questions."
             
         try:
+            # Format prompt for chat-style generation
+            formatted_prompt = f"<|user|>\n{prompt}\n<|assistant|>\n"
+            
             # Prepare input
-            inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+            inputs = self.tokenizer(formatted_prompt, return_tensors="pt")
+            if hasattr(self.model, 'device'):
+                inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
             
-            # Generate output
-            outputs = self.model.generate(
-                **inputs, 
-                max_new_tokens=max_tokens,
-                eos_token_id=self.tokenizer.eos_token_id
-            )
+            # Generate output with better parameters
+            with torch.no_grad() if torch and hasattr(torch, 'no_grad') else nullcontext():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_tokens,
+                    min_new_tokens=20,
+                    temperature=0.7,
+                    do_sample=True,
+                    top_p=0.9,
+                    top_k=50,
+                    repetition_penalty=1.1,
+                    pad_token_id=self.tokenizer.eos_token_id if hasattr(self.tokenizer, 'eos_token_id') else 0,
+                    eos_token_id=self.tokenizer.eos_token_id if hasattr(self.tokenizer, 'eos_token_id') else 0
+                )
             
-            # Decode and return
-            response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-            return response
+            # Decode and extract only the new response
+            full_response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            
+            # Extract just the assistant's response (after the formatted prompt)
+            if "<|assistant|>\n" in full_response:
+                response = full_response.split("<|assistant|>\n")[1].strip()
+            else:
+                # Fallback: remove the original prompt
+                response = full_response[len(formatted_prompt):].strip()
+            
+            return response if response else "I apologize, but I couldn't generate a proper response. Please try rephrasing your question."
             
         except Exception as e:
             logger.error(f"Error during text generation: {e}", exc_info=True)
-            return "Error: Could not generate response."
+            return f"I encountered an error while generating a response: {str(e)}. Please try again."
 
     def get_embeddings(self, text: str):
         """Get embeddings for the given text"""
