@@ -434,6 +434,199 @@ def get_system_status():
     except:
         return False
 
+def send_prompt_to_llm(prompt):
+    """Send a prompt to the LLM and display the response"""
+    try:
+        with st.spinner("Sending prompt to LLM..."):
+            response = requests.post(
+                f"{API_BASE_URL}/query",
+                json={"query": prompt},
+                timeout=30
+            )
+            
+        if response.status_code == 200:
+            result = response.json()
+            
+            # Display the interaction
+            st.success("✅ Prompt sent successfully!")
+            
+            with st.expander("📤 Your Prompt", expanded=True):
+                st.write(prompt)
+            
+            with st.expander("🤖 LLM Response", expanded=True):
+                st.write(result.get("response", "No response received"))
+            
+            # Show any metadata
+            if "metadata" in result:
+                with st.expander("📊 Response Metadata"):
+                    st.json(result["metadata"])
+                    
+        else:
+            st.error(f"❌ Failed to send prompt: {response.status_code}")
+            
+    except requests.exceptions.Timeout:
+        st.error("⏱️ Request timed out. The LLM might be processing a complex query.")
+    except Exception as e:
+        st.error(f"❌ Error sending prompt: {str(e)}")
+
+def initiate_self_learning(iterations, topic=None):
+    """Start a self-learning session"""
+    try:
+        payload = {
+            "iterations": iterations,
+            "topic": topic if topic and topic.strip() else None
+        }
+        
+        with st.spinner(f"Initiating self-learning session ({iterations} iterations)..."):
+            response = requests.post(
+                f"{API_BASE_URL}/self_learn",
+                json=payload,
+                timeout=300  # Increased to 5 minutes for longer sessions
+            )
+        
+        if response.status_code == 200:
+            result = response.json()
+            st.success(f"🚀 Self-learning session started!")
+            
+            with st.expander("📋 Session Details", expanded=True):
+                st.write(f"**Session ID:** {result.get('session_id', 'Unknown')}")
+                st.write(f"**Iterations Requested:** {iterations}")
+                if topic:
+                    st.write(f"**Topic:** {topic}")
+                st.write(f"**Status:** {result.get('status', 'Started')}")
+                st.write(f"**Estimated Duration:** {result.get('estimated_duration_minutes', 'Unknown')} minutes")
+                
+            if result.get('status') == 'started':
+                st.info(f"📈 Learning session is running in the background. Session ID: {result.get('session_id')}")
+                st.info("💡 You can check the system statistics to monitor progress.")
+            elif "progress" in result:
+                st.info(f"📈 Progress: {result['progress']}")
+                
+        else:
+            st.error(f"❌ Failed to start self-learning: {response.status_code}")
+            try:
+                error_detail = response.json()
+                st.error(f"Details: {error_detail.get('detail', 'Unknown error')}")
+            except:
+                st.error(f"HTTP Status: {response.status_code}")
+            
+    except Exception as e:
+        st.error(f"❌ Error starting self-learning: {str(e)}")
+
+def initiate_training_session():
+    """Start a training session"""
+    try:
+        with st.spinner("Starting training session..."):
+            response = requests.post(
+                f"{API_BASE_URL}/train",
+                json={"mode": "interactive"},
+                timeout=30
+            )
+        
+        if response.status_code == 200:
+            result = response.json()
+            st.success("🎯 Training session initiated!")
+            
+            with st.expander("🏋️ Training Details", expanded=True):
+                st.write(f"**Session ID:** {result.get('session_id', 'Unknown')}")
+                st.write(f"**Mode:** Interactive Training")
+                st.write(f"**Status:** {result.get('status', 'Active')}")
+                
+        else:
+            st.error(f"❌ Failed to start training: {response.status_code}")
+            
+    except Exception as e:
+        st.error(f"❌ Error starting training: {str(e)}")
+
+def get_recent_responses(limit=10):
+    """Get recent LLM responses for feedback"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        
+        # Get recent outputs from the database
+        query = """
+            SELECT id, content, timestamp, session_id, score
+            FROM memory 
+            WHERE entry_type IN ('output', 'self_output') 
+            ORDER BY timestamp DESC 
+            LIMIT ?
+        """
+        
+        df = pd.read_sql_query(query, conn, params=(limit,))
+        conn.close()
+        
+        if df.empty:
+            return []
+        
+        # Convert to list of dictionaries
+        responses = []
+        for _, row in df.iterrows():
+            responses.append({
+                'id': row['id'],
+                'content': row['content'],
+                'timestamp': row['timestamp'],
+                'session_id': row['session_id'],
+                'current_score': row['score']
+            })
+        
+        return responses
+        
+    except Exception as e:
+        st.error(f"Error retrieving recent responses: {str(e)}")
+        return []
+
+def submit_feedback(response_data, score, feedback_text):
+    """Submit feedback for a specific response"""
+    try:
+        payload = {
+            "response_id": response_data['id'],
+            "score": score,
+            "feedback": feedback_text.strip() if feedback_text else None,
+            "session_id": response_data.get('session_id')
+        }
+        
+        with st.spinner("Submitting feedback..."):
+            response = requests.post(
+                f"{API_BASE_URL}/feedback",
+                json=payload,
+                timeout=10
+            )
+        
+        if response.status_code == 200:
+            st.success("💾 Feedback submitted successfully!")
+            
+            # Also update the database directly
+            try:
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+                
+                # Insert feedback entry
+                cursor.execute("""
+                    INSERT INTO memory (entry_type, content, score, session_id, timestamp)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    'feedback',
+                    feedback_text if feedback_text else f"Score: {score}",
+                    score,
+                    response_data.get('session_id'),
+                    datetime.now().isoformat()
+                ))
+                
+                conn.commit()
+                conn.close()
+                
+                # Clear cache to refresh data
+                st.cache_data.clear()
+                
+            except Exception as db_error:
+                st.warning(f"Feedback sent to API but database update failed: {str(db_error)}")
+                
+        else:
+            st.error(f"❌ Failed to submit feedback: {response.status_code}")
+            
+    except Exception as e:
+        st.error(f"❌ Error submitting feedback: {str(e)}")
+
 def main():
     # Header
     st.title("AI Learning System Research Analytics")
@@ -472,6 +665,68 @@ def main():
         if st.button("Refresh Data"):
             st.cache_data.clear()
             st.rerun()
+        
+        # Interactive LLM Controls
+        st.divider()
+        st.subheader("🧠 LLM Interaction")
+        
+        # Prompt input
+        prompt_text = st.text_area(
+            "Send Prompt to LLM",
+            placeholder="Enter your prompt here...",
+            height=100,
+            help="Send a direct prompt to the language model"
+        )
+        
+        if st.button("📤 Send Prompt", type="primary"):
+            if prompt_text.strip():
+                send_prompt_to_llm(prompt_text)
+            else:
+                st.warning("Please enter a prompt")
+        
+        # Self-learning controls
+        st.divider()
+        st.subheader("🔄 Self-Learning")
+        
+        learning_iterations = st.slider("Learning Iterations", 1, 20, 5)
+        learning_topic = st.text_input(
+            "Learning Topic (optional)",
+            placeholder="e.g., mathematics, reasoning, coding"
+        )
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🚀 Start Self-Learning"):
+                initiate_self_learning(learning_iterations, learning_topic)
+        
+        with col2:
+            if st.button("🎯 Start Training"):
+                initiate_training_session()
+        
+        # Feedback section
+        st.divider()
+        st.subheader("💬 Provide Feedback")
+        
+        # Get recent responses for feedback
+        recent_responses = get_recent_responses()
+        if recent_responses:
+            response_to_feedback = st.selectbox(
+                "Select Response to Rate",
+                options=range(len(recent_responses)),
+                format_func=lambda x: f"Response {x+1}: {recent_responses[x]['content'][:50]}..."
+            )
+            
+            feedback_score = st.slider("Feedback Score", 0.0, 5.0, 2.5, 0.1)
+            feedback_text = st.text_area(
+                "Feedback Comments",
+                placeholder="Optional: Provide detailed feedback...",
+                height=80
+            )
+            
+            if st.button("💾 Submit Feedback"):
+                submit_feedback(recent_responses[response_to_feedback], feedback_score, feedback_text)
+        else:
+            st.info("No recent responses available for feedback")
     
     # Load and process data
     data = get_advanced_memory_stats()

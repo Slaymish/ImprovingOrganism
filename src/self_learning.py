@@ -435,6 +435,173 @@ class SelfLearningModule:
         
         return session_results
 
+    def conduct_focused_learning_session(self, num_iterations: int, topic: str) -> Dict:
+        """Conduct a self-learning session focused on a specific topic"""
+        session_results = {
+            "session_id": f"{self.session_id}_focused_{topic[:20]}",
+            "start_time": datetime.now(),
+            "topic": topic,
+            "iterations": [],
+            "average_score": 0.0,
+            "improvement_trend": [],
+            "best_response": None,
+            "areas_for_focus": []
+        }
+        
+        scores = []
+        
+        for i in range(num_iterations):
+            logger.info(f"Starting focused learning iteration {i+1}/{num_iterations} on topic: {topic}")
+            
+            try:
+                # Check memory status before each iteration
+                self.check_memory_status()
+                
+                # Generate a topic-focused prompt
+                focused_prompt = self.generate_focused_prompt(topic)
+                
+                # Generate response with reduced token limit for memory constraints
+                response = self.llm.generate(focused_prompt, max_tokens=self.max_response_length)
+                
+                # Handle generation errors gracefully
+                if "error" in response.lower() or "cuda out of memory" in response.lower():
+                    logger.warning(f"Generation issue in iteration {i+1}, using fallback")
+                    response = f"Brief response about {topic}: [Memory-limited response]"
+                
+                # Evaluate the response with topic-specific criteria
+                evaluation = self.evaluate_topic_response(focused_prompt, response, topic)
+                
+                # Store in memory
+                self.memory.store_entry(
+                    content=focused_prompt,
+                    entry_type="focused_prompt",
+                    session_id=session_results["session_id"]
+                )
+                
+                self.memory.store_entry(
+                    content=response,
+                    entry_type="focused_output",
+                    session_id=session_results["session_id"],
+                    score=evaluation["overall_score"]
+                )
+                
+                # Store evaluation as feedback
+                feedback_content = json.dumps({
+                    "score": evaluation["overall_score"],
+                    "iteration": i + 1,
+                    "topic": topic,
+                    "topic_relevance": evaluation.get("topic_relevance", 0.5),
+                    "factual_accuracy": evaluation.get("factual_accuracy", 0.5)
+                })
+                
+                self.memory.store_entry(
+                    content=feedback_content,
+                    entry_type="focused_feedback",
+                    session_id=session_results["session_id"],
+                    score=evaluation["overall_score"]
+                )
+                
+                iteration_result = {
+                    "iteration": i + 1,
+                    "prompt": focused_prompt[:100] + "..." if len(focused_prompt) > 100 else focused_prompt,
+                    "response": response[:200] + "..." if len(response) > 200 else response,
+                    "evaluation": evaluation,
+                    "score": evaluation["overall_score"],
+                    "topic_relevance": evaluation.get("topic_relevance", 0.5)
+                }
+                
+                session_results["iterations"].append(iteration_result)
+                scores.append(evaluation["overall_score"])
+                
+                # Track best response
+                if (session_results["best_response"] is None or 
+                    evaluation["overall_score"] > session_results["best_response"]["score"]):
+                    session_results["best_response"] = iteration_result
+                
+                logger.info(f"Focused iteration {i+1} completed with score: {evaluation['overall_score']:.3f}")
+                
+                # Clear memory after each iteration
+                self.llm.clear_memory()
+                
+            except Exception as e:
+                logger.error(f"Error in focused iteration {i+1}: {e}")
+                scores.append(0.5)  # Neutral score for failed iteration
+            finally:
+                # Ensure memory is cleared
+                self.llm.clear_memory()
+        
+        # Calculate session statistics
+        session_results["average_score"] = sum(scores) / len(scores)
+        session_results["end_time"] = datetime.now()
+        session_results["duration_seconds"] = (session_results["end_time"] - session_results["start_time"]).total_seconds()
+        
+        # Calculate improvement trend
+        if len(scores) > 1:
+            for i in range(1, len(scores)):
+                session_results["improvement_trend"].append(scores[i] - scores[i-1])
+        
+        # Identify topic-specific areas for focus
+        all_areas = []
+        for iteration in session_results["iterations"]:
+            all_areas.extend(iteration["evaluation"].get("areas_for_improvement", []))
+        
+        # Count frequency of issues
+        area_counts = {}
+        for area in all_areas:
+            area_counts[area] = area_counts.get(area, 0) + 1
+        
+        session_results["areas_for_focus"] = sorted(
+            area_counts.items(), 
+            key=lambda x: x[1], 
+            reverse=True
+        )[:3]
+        
+        logger.info(f"Focused learning session on '{topic}' completed. Average score: {session_results['average_score']:.3f}")
+        
+        return session_results
+
+    def generate_focused_prompt(self, topic: str) -> str:
+        """Generate a prompt focused on a specific topic"""
+        focused_templates = [
+            f"Explain the key concepts related to {topic}",
+            f"What are the main applications of {topic}?",
+            f"Describe the current challenges in {topic}",
+            f"How has {topic} evolved over time?",
+            f"What are the best practices for {topic}?"
+        ]
+        
+        template = random.choice(focused_templates)
+        return template
+
+    def evaluate_topic_response(self, prompt: str, response: str, topic: str) -> Dict:
+        """Evaluate a response for topic relevance and accuracy"""
+        evaluation = self.evaluate_response_empirically(prompt, response)
+        
+        # Add topic-specific scoring
+        topic_lower = topic.lower()
+        response_lower = response.lower()
+        
+        # Topic relevance scoring
+        topic_relevance = 0.0
+        if topic_lower in response_lower:
+            topic_relevance += 0.3
+        
+        # Check for topic-related keywords
+        topic_words = topic_lower.split()
+        mentioned_words = sum(1 for word in topic_words if word in response_lower)
+        topic_relevance += min(0.4, mentioned_words * 0.1)
+        
+        # Check response length appropriateness
+        if 50 <= len(response) <= 500:
+            topic_relevance += 0.3
+        
+        evaluation["topic_relevance"] = min(1.0, topic_relevance)
+        
+        # Adjust overall score based on topic relevance
+        evaluation["overall_score"] = (evaluation["overall_score"] + evaluation["topic_relevance"]) / 2
+        
+        return evaluation
+
     def get_learning_insights(self, days_back: int = 7) -> Dict:
         """Analyze learning progress over time"""
         entries = self.memory.get_entries_by_type("self_feedback", limit=100)

@@ -55,6 +55,11 @@ class LLMWrapper:
         self.tokenizer: Optional[AutoTokenizer] = None
         self.device_info = self._get_device_info()
         
+        # Store model information for API responses
+        self.model_name = settings.model_name
+        self.model_path = settings.model_name  # For transformers, path and name are the same
+        self.lora_path = settings.lora_path
+        
         if ML_AVAILABLE:
             try:
                 logger.info(f"🤖 Found model: {settings.model_name}")
