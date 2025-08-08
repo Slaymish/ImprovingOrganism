@@ -9,6 +9,7 @@ from .memory_module import MemoryModule
 from .critic_module import CriticModule
 from .self_learning import SelfLearningModule
 from .lora_trainer import LoRATrainer
+from .metrics import metrics, time_block
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -167,6 +168,25 @@ def simple_query(request: QueryRequest):
         }
     }
 
+def _build_retrieval_context(user_text: str, max_items: int = 5) -> dict:
+    """Retrieve semantic (if available) context. Records metrics.
+    Returns dict with keys: items (list[str]), semantic (bool), latency_s (float).
+    """
+    timer = time_block()
+    items = []
+    semantic_used = False
+    try:
+        results = memory.search_semantic(user_text, limit=max_items)
+        if results:
+            semantic_used = True
+            items = [r.get('content', '') for r in results if r.get('content')]
+    except Exception:
+        items = []
+    latency = timer()
+    if metrics:
+        metrics.record_retrieval(latency, len(items), semantic_used)
+    return {"items": items, "semantic": semantic_used, "latency_s": latency}
+
 @app.post("/query")
 def query(request: QueryRequest):
     """Handle LLM queries from the dashboard"""
@@ -174,11 +194,14 @@ def query(request: QueryRequest):
         # Generate session ID if not provided
         session_id = request.session_id or str(uuid.uuid4())
         
-        # Augment prompt with semantic context from memory
-        semantic_context = memory.search_semantic(request.query, limit=3)
-        if semantic_context:
-            context_str = "\n".join([f"Previous related idea: {item['content']}" for item in semantic_context])
-            augmented_prompt = f"Based on the following context, answer the user's query.\n\nContext:\n{context_str}\n\nUser Query: {request.query}"
+        retrieval = _build_retrieval_context(request.query, max_items=3)
+        if retrieval["items"]:
+            context_str = "\n".join([f"Context snippet: {c}" for c in retrieval["items"]])
+            augmented_prompt = (
+                "You are an adaptive assistant. Use retrieved context when relevant; "
+                "ignore irrelevant lines.\n\nRetrieved Context:\n" + context_str +
+                f"\n\nUser Query: {request.query}\nAnswer:"
+            )
         else:
             augmented_prompt = request.query
 
@@ -219,7 +242,7 @@ def query(request: QueryRequest):
             score=auto_score
         )
         
-        logger.info(f"Generated response for session {session_id} with auto-score {auto_score:.2f}")
+    logger.info(f"Generated response for session {session_id} with auto-score {auto_score:.2f} retrieval_items={len(retrieval['items'])} retrieval_semantic={retrieval['semantic']}")
         
         return {
             "response": output,
@@ -229,7 +252,9 @@ def query(request: QueryRequest):
                 "model_name": getattr(llm, 'model_name', 'mock') if llm else 'mock',
                 "model_path": getattr(llm, 'model_path', 'none') if llm else 'none',
                 "timestamp": memory.read_by_session(session_id)[-1].timestamp if memory.read_by_session(session_id) else None,
-                "semantic_context_used": bool(semantic_context)
+                "semantic_context_used": retrieval["semantic"],
+                "retrieval_items": len(retrieval["items"]),
+                "retrieval_latency_ms": round(retrieval["latency_s"] * 1000, 2)
             }
         }
         
@@ -689,11 +714,14 @@ def generate(prompt: Prompt):
         # Generate session ID if not provided
         session_id = prompt.session_id or str(uuid.uuid4())
         
-        # Augment with semantic context
-        semantic_context = memory.search_semantic(prompt.text, limit=3)
-        if semantic_context:
-            context_str = "\n".join([f"Previous related idea: {item['content']}" for item in semantic_context])
-            augmented_prompt = f"Based on the following context, answer the user's query.\n\nContext:\n{context_str}\n\nUser Query: {prompt.text}"
+        retrieval = _build_retrieval_context(prompt.text, max_items=3)
+        if retrieval["items"]:
+            context_str = "\n".join([f"Context snippet: {c}" for c in retrieval["items"]])
+            augmented_prompt = (
+                "You are an adaptive assistant. Ground answer using retrieved context where helpful; "
+                "if irrelevant, proceed normally.\n\nRetrieved Context:\n" + context_str +
+                f"\n\nUser Prompt: {prompt.text}\nAnswer:"
+            )
         else:
             augmented_prompt = prompt.text
 
@@ -844,7 +872,7 @@ def get_stats():
         recent_scores = [f.score for f in recent_feedback if f.score is not None]
         recent_avg = sum(recent_scores) / len(recent_scores) if recent_scores else 0.0
         
-        return {
+        stats_payload = {
             "total_entries": len(all_entries),
             "feedback_entries": len(feedback_entries),
             "average_score": round(avg_score, 2),
@@ -856,6 +884,9 @@ def get_stats():
                 "internal_feedback": len(memory.read_by_type("internal_feedback")),
             }
         }
+        if metrics:
+            stats_payload["metrics"] = metrics.snapshot()
+        return stats_payload
     except Exception as e:
         logger.error(f"Stats retrieval failed: {e}")
         raise HTTPException(status_code=500, detail=f"Stats retrieval failed: {str(e)}")

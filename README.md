@@ -354,6 +354,33 @@ The system is designed for extensibility:
 
 ---
 
+## ♻️ Retrieval-Augmented Generation & Metrics (Phase 1 Implemented)
+
+Phase 1 enhancements introduced:
+
+* Retrieval-Augmented Generation (RAG) pathway: `/query` and `/generate` now build contextual prompts using up to 3 semantically retrieved memory snippets (graceful no-op if vector backend absent).
+* Unified retrieval helper with latency measurement & semantic usage flag.
+* Lightweight in-memory metrics collector (`src/metrics.py`) tracking:
+  * Retrieval call counts, hit rate, semantic usage ratio, latency distribution
+  * Average component scores (coherence, novelty, memory_alignment, relevance, semantic_relevance)
+* Extended critic scoring with semantic relevance component (embedding proximity + lexical overlap).
+* `/stats` endpoint now returns a `metrics` section when available.
+* Structured logging reports retrieval utilization per response.
+
+Example `GET /stats` excerpt:
+```json
+{
+  "metrics": {
+    "retrieval": {"calls": 12, "hit_rate": 0.58, "semantic_ratio": 0.58, "latency": {"avg_ms": 4.12}},
+    "scoring": {"avg_components": {"novelty": 3.6, "semantic_relevance": 3.1}}
+  }
+}
+```
+
+If `weaviate` (or a future vector backend) is absent, retrieval metrics still record zero-hit events without errors.
+
+---
+
 **Happy learning and improving! 🎉**
 
 ## 🧩 Optional Dependencies & Fallback Behavior

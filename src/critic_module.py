@@ -7,6 +7,13 @@ except Exception:  # pragma: no cover
     SemanticSearcher = Any  # type: ignore
 from collections import Counter
 import math
+try:
+    from .metrics import metrics  # package-style import
+except Exception:  # pragma: no cover - fallback when imported as top-level module
+    try:
+        from metrics import metrics  # type: ignore
+    except Exception:  # pragma: no cover
+        metrics = None  # type: ignore
 
 class CriticModule:
     def __init__(self):
@@ -21,18 +28,29 @@ class CriticModule:
         - Relevance to prompt
         """
         coherence_score = self._score_coherence(output)
-        novelty_score = self._score_novelty_semantic(output, memory) # Changed to semantic novelty
+        novelty_score = self._score_novelty_semantic(output, memory)  # semantic novelty
         alignment_score = self._score_memory_alignment(prompt, output, memory)
         relevance_score = self._score_relevance(prompt, output)
-        
+        semantic_rel_score = self._score_semantic_relevance(prompt, output, memory)
+
         # Weighted combination
         final_score = (
-            0.1 * coherence_score +
-            0.25 * novelty_score + # Increased weight for novelty
-            0.25 * alignment_score + # Increased weight for alignment
-            0.4 * relevance_score # Adjusted weight for relevance
+            0.08 * coherence_score +
+            0.22 * novelty_score +
+            0.25 * alignment_score +
+            0.30 * relevance_score +
+            0.15 * semantic_rel_score
         )
-        
+
+        if metrics:
+            metrics.record_scores({
+                'coherence': coherence_score,
+                'novelty': novelty_score,
+                'memory_alignment': alignment_score,
+                'relevance': relevance_score,
+                'semantic_relevance': semantic_rel_score
+            })
+
         return min(5.0, max(0.0, final_score))
 
     def _score_novelty_semantic(self, output: str, memory: Any) -> float:
@@ -192,6 +210,36 @@ class CriticModule:
                 base_score += 0.5
 
         return min(5.0, base_score)
+
+    def _score_semantic_relevance(self, prompt: str, output: str, memory: Any) -> float:
+        """Semantic relevance via embedding similarity between prompt and output.
+        Uses memory.search_semantic if available by querying with prompt and
+        seeing if output shares proximity characteristics. Fallback returns neutral.
+        """
+        if not hasattr(memory, 'search_semantic'):
+            return 2.5
+        try:
+            # Use semantic search on prompt, then check lexical overlap ratio between output and top hit
+            results = memory.search_semantic(prompt, limit=3)
+            if not results:
+                return 3.0
+            # Aggregate distances (lower = closer) to derive a context tightness score
+            distances = [r.get('_additional', {}).get('distance', 0.5) for r in results]
+            avg_dist = sum(distances) / len(distances)
+            # Convert distance (0..2 approx) into similarity-like score
+            similarity_proxy = max(0.0, 1.0 - min(1.0, avg_dist))
+            # Lexical overlap boost
+            top_content = results[0].get('content', '')
+            prompt_words = set(prompt.lower().split())
+            out_words = set(output.lower().split())
+            top_words = set(top_content.lower().split())
+            overlap = len((out_words & top_words) | (out_words & prompt_words))
+            denom = len(out_words) + 1
+            overlap_ratio = overlap / denom
+            raw = 1.5 + 3.5 * (0.6 * similarity_proxy + 0.4 * overlap_ratio)
+            return max(0.0, min(5.0, raw))
+        except Exception:
+            return 2.5
     
     def get_detailed_scores(self, prompt: str, output: str, memory: Any) -> Dict[str, float]:
         """Get breakdown of all scoring components"""
@@ -200,5 +248,6 @@ class CriticModule:
             'novelty': self._score_novelty_semantic(output, memory),
             'memory_alignment': self._score_memory_alignment(prompt, output, memory),
             'relevance': self._score_relevance(prompt, output),
+            'semantic_relevance': self._score_semantic_relevance(prompt, output, memory),
             'overall': self.score(prompt, output, memory)
         }

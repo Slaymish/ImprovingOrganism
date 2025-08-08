@@ -82,10 +82,12 @@ def test_overall_score(critic):
     with patch.object(critic, '_score_coherence', return_value=4.5), \
          patch.object(critic, '_score_novelty_semantic', return_value=5.0), \
          patch.object(critic, '_score_memory_alignment', return_value=4.0), \
-         patch.object(critic, '_score_relevance', return_value=4.8):
-        
+         patch.object(critic, '_score_relevance', return_value=4.8), \
+         patch.object(critic, '_score_semantic_relevance', return_value=4.5):
+
         score = critic.score(prompt, output, mock_memory)
-        
-        # Expected score = (0.1 * 4.5) + (0.25 * 5.0) + (0.25 * 4.0) + (0.4 * 4.8)
-        # = 0.45 + 1.25 + 1.0 + 1.92 = 4.62
-        assert abs(score - 4.62) < 0.01
+
+        # Updated expected score with new weights including semantic relevance:
+        # 0.08*4.5 + 0.22*5.0 + 0.25*4.0 + 0.30*4.8 + 0.15*4.5
+        # = 0.36 + 1.10 + 1.00 + 1.44 + 0.675 = 4.575
+        assert abs(score - 4.575) < 0.01

@@ -71,8 +71,32 @@ class MemoryModule:
         self.close()
 
     def write(self, content: str, entry_type: str, session_id: Optional[str] = None, score: Optional[float] = None):
+        # --- Data hygiene filters (lightweight, rule-based) ---
+        if not content or not content.strip():  # skip empty
+            return
+        text = content.strip()
+        # Length bounds (very short or excessively long)
+        if len(text) < 5 or len(text) > 5000:  # pragmatic guard rails
+            return
+        # Repetition / low information density heuristic
+        lowered = text.lower()
+        unique_chars = len(set(lowered))
+        # Allow short strings; flag only if extremely low diversity relative to length
+        if len(lowered) > 30 and unique_chars < len(lowered) * 0.1:
+            return
+        # Excessive single token repetition (e.g., 'hello hello hello ...')
+        tokens = lowered.split()
+        if tokens:
+            most_common = max(tokens.count(t) for t in set(tokens))
+            if most_common > 0.6 * len(tokens):
+                return
+        # Optional: basic profanity / toxicity placeholder (extensible)
+        banned = {"toxic_placeholder_word"}
+        if any(b in lowered for b in banned):
+            return
+
         entry = MemoryEntry(
-            content=content,
+            content=text,
             entry_type=entry_type,
             session_id=session_id,
             score=score

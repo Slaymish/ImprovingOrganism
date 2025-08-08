@@ -244,6 +244,27 @@ class LatentWorkspace:
                     query_embedding = self.torch.tensor(query_embedding, dtype=self.torch.float32)
                 query_embedding = F.normalize(0.8 * query_embedding + 0.2 * self.goal_state, p=2, dim=0)
                 
+        # Use uncertainty to modulate reasoning_steps lightly (uncertainty utilization v1)
+        if reasoning_steps >= 3:  # Preserve small-step determinism for tests
+            try:
+                if hasattr(self, 'uncertainty_map'):
+                    # Compute a simple aggregate uncertainty (mean of top-k dims)
+                    if self.torch is None:
+                        unc = float(np.mean(np.sort(self.uncertainty_map)[-50:])) if len(self.uncertainty_map) >= 50 else float(np.mean(self.uncertainty_map))
+                    else:
+                        sorted_unc, _ = self.uncertainty_map.flatten().sort(descending=True)  # type: ignore
+                        take = min(50, sorted_unc.shape[0])
+                        unc = float(sorted_unc[:take].mean())
+                    # Map uncertainty (0..1 approx) -> reasoning step adjustment (±2 bounds)
+                    adj = 0
+                    if unc > 0.6:
+                        adj = 2
+                    elif unc < 0.2:
+                        adj = -1
+                    reasoning_steps = max(1, min(10, reasoning_steps + adj))
+            except Exception:
+                pass
+
         # Use appropriate reasoning based on mock mode
         if self.torch is None:
             reasoning_result = self._mock_reason(query_embedding, reasoning_steps)
@@ -271,7 +292,8 @@ class LatentWorkspace:
             'reasoning_steps': reasoning_steps,
             'reasoning_time': reasoning_time,
             'workspace_state': 'active',
-            'memory_usage': len(self.reasoning_history)
+            'memory_usage': len(self.reasoning_history),
+            'uncertainty_steps_adjusted': reasoning_steps
         }
 
     def _real_reason(self, query_embedding, reasoning_steps: int = 5):
@@ -454,10 +476,9 @@ class LatentWorkspace:
             
         # Find least used memory slot
         least_used_idx = torch.argmin(self.memory_usage).item()
-        
         # Aggregate recent high-importance episodic memories
         recent_important = [
-            mem for mem in list(self.episodic_memory)[-20:] 
+            mem for mem in list(self.episodic_memory)[-20:]
             if mem['importance'] > 0.5
         ]
         

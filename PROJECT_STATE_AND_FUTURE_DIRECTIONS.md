@@ -56,21 +56,23 @@ The project is now a resilient, test‑backed "adaptive AI substrate" with a com
 
 ### Phase 1 (Immediate / Foundation Hardening)
 Focus: Integrate semantic retrieval, tighten data quality, expose observability.
-1. Retrieval-Augmented Generation (RAG) Path:
-    * Inject top-k semantic memories (vector store if available; fallback lexical) into prompt preamble.
-    * Cache embedding lookups; add retrieval latency metric.
-2. Embedding-Based Critic Extensions:
-    * Replace novelty heuristic with average cosine distance vs recent/cluster centroids.
-    * Add semantic relevance: compare response embedding to enriched (prompt + retrieved context) embedding.
-3. Data Hygiene Layer:
-    * Lightweight rule-based filters (length extremes, repeated tokens, offensive lexicon stub) before memory persistence.
-4. Metrics & Instrumentation:
-    * Introduce a metrics module (e.g., Prometheus client or simple CSV time-series) for: average score per metric, retrieval hit-rate, training triggers, latency buckets.
-5. Uncertainty Utilization (v1):
-    * Use high-uncertainty topics to bias self-learning prompt domain selection.
-6. Test Enhancements:
-    * Add golden regression tests for critic outputs with fixed seed.
-    * Add retrieval integration test (with mocked vector backend).
+1. Retrieval-Augmented Generation (RAG) Path: (DONE v1)
+    * Top-k semantic memories injected into prompt (graceful fallback when unavailable).
+    * Retrieval latency + hit metrics recorded.
+2. Embedding-Based Critic Extensions: (PARTIAL)
+    * Added semantic relevance component & metrics recording.
+    * (Next) Replace novelty heuristic with centroid-based distance clusters.
+3. Data Hygiene Layer: (PARTIAL)
+    * Added rule-based filters (length, repetition, low information) pre-persistence.
+    * (Next) Add semantic toxicity / duplication via embeddings.
+4. Metrics & Instrumentation: (DONE v1)
+    * In-memory metrics module with retrieval + scoring component aggregation.
+    * (Next) Expose Prometheus / structured export if needed.
+5. Uncertainty Utilization (v1): (PARTIAL)
+    * Basic uncertainty → adaptive reasoning step modulation implemented.
+    * (Next) Use uncertainty to bias prompt/topic generation.
+6. Test Enhancements: (PENDING)
+    * Golden critic regression & retrieval integration tests to be added.
 
 ### Phase 2 (Adaptive Learning & Preference Feedback)
 Focus: Smarter sample selection and model update quality.
