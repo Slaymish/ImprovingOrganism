@@ -76,8 +76,9 @@ Focus: Integrate semantic retrieval, tighten data quality, expose observability.
 
 ### Phase 2 (Adaptive Learning & Preference Feedback)
 Focus: Smarter sample selection and model update quality.
-1. Preference Pair Generation:
-    * Generate N variants per prompt (controlled diversity via temperature / top-p) and internally rank (critic score → preference pairs).
+1. Preference Pair Generation: (PARTIAL)
+    * Basic variant generation + critic-based ranking implemented (v1).
+    * (Next) Add diversity controls (temperature/top-p adaptation) & duplicate suppression.
 2. Lightweight Preference Optimization:
     * Implement DPO or a simplified logistic preference fine-tune using pairs (fall back to single-example SFT if insufficient pairs).
 3. Active Learning Loop:

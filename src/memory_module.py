@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import List, Optional
 import os
 from .config import settings
+import os as _os
 
 # Optional import of VectorMemory so tests can patch src.memory_module.VectorMemory
 try:  # pragma: no cover
@@ -52,8 +53,11 @@ class MemoryModule:
     def __init__(self):
         """Initialize memory module with optional SQLAlchemy session and vector memory."""
         self.session = SessionLocal() if callable(SessionLocal) else None
-        # Provide vector memory helper if available
-        self.vector_memory = VectorMemory() if VectorMemory else None
+        # Provide vector memory helper if available (skip in lightweight self-learning mode)
+        if _os.getenv('LIGHTWEIGHT_SELF_LEARNING'):
+            self.vector_memory = None
+        else:
+            self.vector_memory = VectorMemory() if VectorMemory else None
 
     # ---- Context management -------------------------------------------------
     def close(self):  # pragma: no cover - trivial

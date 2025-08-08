@@ -11,22 +11,50 @@ import math
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional
 import requests
-from .llm_wrapper import LLMWrapper
-from .memory_module import MemoryModule
-from .config import settings
+import os
+
+LIGHTWEIGHT = bool(os.getenv('LIGHTWEIGHT_SELF_LEARNING'))
+
+if not LIGHTWEIGHT:
+    try:
+        from .llm_wrapper import LLMWrapper  # type: ignore
+    except Exception:  # pragma: no cover
+        from llm_wrapper import LLMWrapper  # type: ignore
+else:
+    LLMWrapper = None  # type: ignore
+
+try:
+    from .memory_module import MemoryModule  # type: ignore
+    from .config import settings  # type: ignore
+    from .critic_module import CriticModule  # type: ignore
+    from .preference_learning import PreferencePair, preference_optimizer  # type: ignore
+except Exception:  # pragma: no cover
+    from memory_module import MemoryModule  # type: ignore
+    from config import settings  # type: ignore
+    from critic_module import CriticModule  # type: ignore
+    from preference_learning import PreferencePair, preference_optimizer  # type: ignore
 
 logger = logging.getLogger(__name__)
 
 class SelfLearningModule:
     def __init__(self):
-        try:
-            self.llm = LLMWrapper()
-            logger.info("LLM wrapper initialized successfully for self-learning")
-        except Exception as e:
-            logger.warning(f"Failed to initialize LLM wrapper for self-learning: {e}")
-            self.llm = None
+        # Lightweight test mode to avoid heavy model loading
+        if os.getenv('LIGHTWEIGHT_SELF_LEARNING'):
+            class _MockLLM:
+                def generate(self, prompt: str, max_tokens: int = 100):
+                    return f"Mock variant: {prompt} :: {random.randint(0,999)}"
+            self.llm = _MockLLM()
+            logger.info("SelfLearningModule using lightweight mock LLM (env override).")
+        else:
+            try:
+                self.llm = LLMWrapper()
+                logger.info("LLM wrapper initialized successfully for self-learning")
+            except Exception as e:
+                logger.warning(f"Failed to initialize LLM wrapper for self-learning: {e}")
+                self.llm = None
             
         self.memory = MemoryModule()
+        self.critic = CriticModule()
         self.session_id = f"self_learning_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
         # Knowledge domains for generating diverse prompts
@@ -45,6 +73,46 @@ class SelfLearningModule:
         # Memory management settings
         self.max_prompt_length = 200  # Shorter prompts for memory efficiency
         self.max_response_length = 100  # Shorter responses for memory efficiency
+        # Phase 2 settings
+        self.preference_variants = 3  # N variants per prompt
+        self.min_score_gap = 0.15  # Minimum normalized score gap to form a preference
+
+    def generate_preference_pairs(self, prompt: str) -> List[PreferencePair]:
+        """Generate multiple variants for a prompt and create preference pairs using critic scores.
+
+        Returns list of PreferencePair objects (at most floor(n/2)).
+        """
+        if not self.llm:
+            return []
+        variants: List[Tuple[str, float]] = []
+        for i in range(self.preference_variants):
+            try:
+                # Diversity via simple temperature modulation (mock-friendly)
+                variant = self.llm.generate(prompt, max_tokens=self.max_response_length)
+                # Score using critic (memory provided for semantic context if available)
+                score = self.critic.score(prompt, variant, self.memory)
+                variants.append((variant, score))
+            except Exception as e:
+                logger.warning(f"Variant generation failed: {e}")
+        if len(variants) < 2:
+            return []
+        # Sort by score desc
+        variants.sort(key=lambda x: x[1], reverse=True)
+        pairs: List[PreferencePair] = []
+        # Form pairs: best vs each worse if gap large enough
+        best_resp, best_score = variants[0]
+        for worse_resp, worse_score in variants[1:]:
+            if best_score - worse_score >= self.min_score_gap:
+                pair = PreferencePair(
+                    prompt=prompt,
+                    better=best_resp,
+                    worse=worse_resp,
+                    better_score=best_score,
+                    worse_score=worse_score
+                )
+                preference_optimizer.add_pair(pair)
+                pairs.append(pair)
+        return pairs
 
     def check_memory_status(self):
         """Check and log current memory status"""
