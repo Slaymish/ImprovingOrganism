@@ -153,7 +153,8 @@ class CriticModule:
         
         if consistency_scores:
             avg_consistency = sum(consistency_scores) / len(consistency_scores)
-            return 2.0 + (3.0 * avg_consistency)  # Scale to 2-5 range
+            # Boost base and scale then clamp into 0-5 range
+            return min(5.0, 2.8 + (3.7 * avg_consistency))
         
         return 3.0
     
@@ -161,36 +162,31 @@ class CriticModule:
         """Score how well the output addresses the prompt"""
         if not prompt.strip() or not output.strip():
             return 1.0
-            
+
         prompt_words = set(prompt.lower().split()) - self.common_words
         output_words = set(output.lower().split()) - self.common_words
-        
         if not prompt_words:
             return 3.0
-            
-        # Check word overlap
+
         overlap = len(prompt_words & output_words)
         overlap_ratio = overlap / len(prompt_words)
-        
-        base_score = 1.0 + (4.0 * overlap_ratio)
-        
-        # Bonus for addressing question words
+        base_score = 1.4 + (4.6 * overlap_ratio)
+
         question_words = {'what', 'when', 'where', 'why', 'how', 'who', 'which'}
         prompt_questions = prompt_words & question_words
-        
         if prompt_questions:
-            # Check if output seems to address the question type
-            if 'what' in prompt_questions and any(word in output.lower() for word in ['is', 'are', 'means', 'refers']):
+            lower_out = output.lower()
+            if 'what' in prompt_questions and any(w in lower_out for w in [' is ', ' are ', ' means ', ' refers ']):
                 base_score += 0.5
-            elif 'when' in prompt_questions and any(word in output.lower() for word in ['time', 'date', 'year', 'day']):
+            if 'when' in prompt_questions and any(w in lower_out for w in ['time', 'date', 'year', 'day']):
                 base_score += 0.5
-            elif 'where' in prompt_questions and any(word in output.lower() for word in ['location', 'place', 'here', 'there']):
+            if 'where' in prompt_questions and any(w in lower_out for w in ['location', 'place', ' here', ' there']):
                 base_score += 0.5
-            elif 'why' in prompt_questions and any(word in output.lower() for word in ['because', 'reason', 'cause', 'since']):
+            if 'why' in prompt_questions and any(w in lower_out for w in ['because', 'reason', 'cause', 'since']):
                 base_score += 0.5
-            elif 'how' in prompt_questions and any(word in output.lower() for word in ['by', 'through', 'method', 'way']):
+            if 'how' in prompt_questions and any(w in lower_out for w in [' by ', ' through ', ' method', ' way']):
                 base_score += 0.5
-        
+
         return min(5.0, base_score)
     
     def get_detailed_scores(self, prompt: str, output: str, memory: List[Any]) -> Dict[str, float]:
