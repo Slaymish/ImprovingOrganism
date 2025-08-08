@@ -2,6 +2,17 @@ import weaviate
 from weaviate.auth import AuthApiKey
 import logging
 from typing import Optional, List, Dict, Any
+import logging
+
+# Optional dependency: weaviate
+try:  # pragma: no cover - import guard
+    import weaviate  # type: ignore
+    from weaviate.auth import AuthApiKey  # type: ignore
+    WEAVIATE_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    weaviate = None  # type: ignore
+    AuthApiKey = None  # type: ignore
+    WEAVIATE_AVAILABLE = False
 from .config import settings
 from .llm_wrapper import LLMWrapper
 
@@ -9,12 +20,15 @@ logger = logging.getLogger(__name__)
 
 class VectorMemory:
     def __init__(self):
-        self.client = self._connect()
+        self.client = self._connect() if WEAVIATE_AVAILABLE else None
         self.llm_wrapper = LLMWrapper()
         self.class_name = "MemoryEntry"
         self._ensure_schema()
 
     def _connect(self) -> Optional[weaviate.Client]:
+        if not WEAVIATE_AVAILABLE:
+            logger.warning("Weaviate not installed; VectorMemory operating in no-op mode.")
+            return None
         try:
             client = weaviate.Client(
                 url=settings.weaviate_url,
@@ -23,10 +37,9 @@ class VectorMemory:
             if client.is_ready():
                 logger.info("Weaviate client connected successfully.")
                 return client
-            else:
-                logger.error("Weaviate is not ready.")
-                return None
-        except Exception as e:
+            logger.error("Weaviate is not ready.")
+            return None
+        except Exception as e:  # pragma: no cover
             logger.error(f"Failed to connect to Weaviate: {e}")
             return None
 

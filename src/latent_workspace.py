@@ -7,12 +7,21 @@ try:
     import torch  # type: ignore
     import torch.nn.functional as F  # type: ignore
     ML_AVAILABLE = True
-    TensorType = torch.Tensor
-except ImportError:
+except ImportError:  # pragma: no cover - executed only when torch missing
     ML_AVAILABLE = False
-    torch = None
-    F = None
-    TensorType = Any  # Fallback type
+    torch = None  # type: ignore
+    F = None  # type: ignore
+
+# Generic tensor type alias for annotations without importing torch when absent
+try:  # Provide a concrete alias for type checking while remaining optional
+    from typing import TYPE_CHECKING
+    if ML_AVAILABLE:
+        from torch import Tensor as _TorchTensor  # type: ignore
+        TensorType = _TorchTensor  # type: ignore
+    else:  # pragma: no cover
+        TensorType = Any  # type: ignore
+except Exception:  # pragma: no cover
+    TensorType = Any  # Fallback
 
 class LatentWorkspace:
     """
@@ -84,7 +93,7 @@ class LatentWorkspace:
         self.attention_decay = 0.95
         self.reasoning_temperature = 1.0
 
-    def update(self, embeddings: TensorType, context: str = "", importance: float = 1.0):
+    def update(self, embeddings, context: str = "", importance: float = 1.0):
         """
         Merge new embeddings into workspace with sophisticated memory consolidation.
         
@@ -194,7 +203,7 @@ class LatentWorkspace:
         # Update confidence (simple mock)
         self.confidence_state = min(1.0, self.confidence_state + 0.01 * importance)
 
-    def reason(self, query = "", reasoning_steps: int = 5) -> Dict[str, Any]:
+    def reason(self, query = "", reasoning_steps: int = 5, use_goal: bool = False) -> Dict[str, Any]:
         """
         Perform multi-step reasoning in latent space
         
@@ -220,6 +229,17 @@ class LatentWorkspace:
         else:
             # Assume query is already an embedding array
             query_embedding = query
+
+        # Optionally blend current goal into query for goal-directed reasoning
+        if use_goal and self.torch is None:
+            if np.linalg.norm(self.goal_state) > 0:
+                query_embedding = 0.8 * query_embedding + 0.2 * self.goal_state
+        elif use_goal and self.torch is not None and self.torch is not None:
+            if self.torch.norm(self.goal_state) > 1e-6:
+                # Ensure tensor types
+                if not hasattr(query_embedding, 'shape') or isinstance(query_embedding, np.ndarray):
+                    query_embedding = self.torch.tensor(query_embedding, dtype=self.torch.float32)
+                query_embedding = F.normalize(0.8 * query_embedding + 0.2 * self.goal_state, p=2, dim=0)
                 
         # Use appropriate reasoning based on mock mode
         if self.torch is None:
@@ -341,55 +361,42 @@ class LatentWorkspace:
         
         return reasoning_state
 
-    def _reasoning_step(self, combined_state: torch.Tensor, step: int) -> torch.Tensor:
-        """
-        Single reasoning transformation step.
-        This could be replaced with a learned neural network in future versions.
-        """
-        # Simple but effective reasoning transformation
-        # In a more advanced version, this would be a learned neural network
-        
-        # Ensure combined_state has the right size
+    def _reasoning_step(self, combined_state, step: int):  # type: ignore[override]
+        """Single latent reasoning transformation step (attention + residual + modulation)."""
+        if self.torch is None:
+            # Should not be called in mock mode, but provide safe fallback
+            return combined_state
+
         state_dim = self.dim
+        # Resize
         if combined_state.size(0) < state_dim:
-            # Pad if too small
             padded = torch.zeros(state_dim, dtype=combined_state.dtype, device=combined_state.device)
             padded[:combined_state.size(0)] = combined_state
             combined_state = padded
         elif combined_state.size(0) > state_dim:
-            # Truncate if too large
             combined_state = combined_state[:state_dim]
-        
-        # Simple self-attention mechanism using the state as query, key, and value
-        query = combined_state
-        key = combined_state
-        value = combined_state
-        
-        # Compute attention scores (dot product attention)
-        attention_scores = torch.dot(query, key) / np.sqrt(state_dim)
-        attention_weight = torch.sigmoid(attention_scores)  # Single attention weight
-        
-        # Apply attention (simple scaling)
-        attended = attention_weight * value
-        
-        # Residual connection and normalization
-        output = F.normalize(query + attended, p=2, dim=0)
-        
-        # Add some non-linearity and step-dependent variation
-        step_factor = 1.0 + 0.1 * np.sin(step * np.pi / self.num_reasoning_layers)
-        output = output * step_factor
-        
-        return output
-        
-        return F.normalize(output, p=2, dim=0)
 
-    def _compute_attention(self, embeddings: torch.Tensor) -> torch.Tensor:
+        # Self-attention (single-head simplified)
+        query = key = value = combined_state
+        attention_scores = torch.dot(query, key) / (state_dim ** 0.5)
+        attention_weight = torch.sigmoid(attention_scores)
+        attended = attention_weight * value
+
+        # Residual + norm
+        output = F.normalize(query + attended, p=2, dim=0)
+
+        # Step modulation
+        step_factor = 1.0 + 0.1 * np.sin(step * np.pi / max(1, self.num_reasoning_layers))
+        output = output * step_factor
+        return output
+
+    def _compute_attention(self, embeddings):
         """Compute attention weights for new embeddings"""
         similarities = F.cosine_similarity(embeddings, self.workspace.unsqueeze(0), dim=1)
         attention = torch.softmax(similarities / self.reasoning_temperature, dim=0)
         return attention
 
-    def _compute_novelty(self, embedding: torch.Tensor) -> torch.Tensor:
+    def _compute_novelty(self, embedding):
         """Compute novelty of embedding compared to existing knowledge"""
         if len(self.episodic_memory) == 0:
             return torch.tensor(1.0)
@@ -404,7 +411,7 @@ class LatentWorkspace:
         
         return torch.clamp(novelty, 0.0, 1.0)
 
-    def _compute_relevance(self, embedding: torch.Tensor) -> torch.Tensor:
+    def _compute_relevance(self, embedding):
         """Compute relevance of embedding to current goal state"""
         if torch.norm(self.goal_state) < 1e-6:
             return torch.tensor(0.5)  # Neutral relevance if no goal set
@@ -412,7 +419,7 @@ class LatentWorkspace:
         relevance = F.cosine_similarity(embedding, self.goal_state, dim=0)
         return torch.sigmoid(relevance)  # Ensure positive
 
-    def _attend_to_memories(self, query_state: torch.Tensor) -> torch.Tensor:
+    def _attend_to_memories(self, query_state):
         """Compute attention weights over semantic memory"""
         if torch.norm(self.semantic_memory).item() < 1e-6:
             return torch.zeros(self.memory_size)
@@ -429,7 +436,7 @@ class LatentWorkspace:
         
         return attention_weights
 
-    def _gather_attended_memories(self, attention_weights: torch.Tensor) -> torch.Tensor:
+    def _gather_attended_memories(self, attention_weights):
         """Gather memories based on attention weights"""
         attended = torch.sum(
             attention_weights.unsqueeze(1) * self.semantic_memory, 
@@ -466,7 +473,7 @@ class LatentWorkspace:
             # Reset usage counter
             self.memory_usage[least_used_idx] = 0
 
-    def _update_uncertainty(self, embeddings: torch.Tensor):
+    def _update_uncertainty(self, embeddings):
         """Update uncertainty estimates based on new information"""
         if embeddings.dim() == 1:
             embeddings = embeddings.unsqueeze(0)
@@ -650,13 +657,13 @@ class LatentWorkspace:
         else:
             return "The latent reasoning reveals balanced perspectives requiring synthesis."
 
-    def _compute_entropy(self, tensor: torch.Tensor) -> float:
+    def _compute_entropy(self, tensor) -> float:
         """Compute entropy of a tensor (measure of information content)"""
         probs = torch.softmax(torch.abs(tensor), dim=0)
         entropy = -torch.sum(probs * torch.log(probs + 1e-8))
         return entropy.item()
 
-    def read(self) -> torch.Tensor:
+    def read(self):
         """Read current workspace state"""
         if not ML_AVAILABLE:
             return self.workspace

@@ -10,15 +10,18 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 from src.memory_module import MemoryModule
 
 @pytest.fixture
-@patch('src.memory_module.VectorMemory')
-def memory_module(MockVectorMemory):
-    """Fixture for MemoryModule with a mocked VectorMemory."""
-    # Prevent the real __init__ from running
-    with patch.object(MemoryModule, '__init__', lambda x: None):
-        memory_module = MemoryModule()
-        memory_module.session = MagicMock()
-        memory_module.vector_memory = MockVectorMemory.return_value
-        yield memory_module
+def memory_module():
+    """Fixture for MemoryModule with a mocked VectorMemory.
+
+    Avoids using @patch decorator directly (which interferes with generator fixtures)
+    by performing patching inside the fixture context.
+    """
+    with patch('src.memory_module.VectorMemory') as MockVectorMemory:
+        with patch.object(MemoryModule, '__init__', lambda self: None):
+            module = MemoryModule()
+            module.session = MagicMock()
+            module.vector_memory = MockVectorMemory.return_value
+            yield module
 
 def test_write_calls_vector_memory(memory_module):
     """Test that write method also calls vector_memory.add_entry"""

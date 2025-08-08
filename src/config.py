@@ -1,6 +1,18 @@
 import os
 from typing import Optional
-from pydantic_settings import BaseSettings
+
+# Support environments where pydantic-settings isn't installed (e.g. lightweight dev deps)
+try:
+    from pydantic_settings import BaseSettings  # type: ignore
+except ImportError:  # pragma: no cover - fallback path
+    try:
+        from pydantic import BaseSettings  # type: ignore
+    except ImportError:
+        # Minimal fallback shim so tests that only touch settings still work
+        class BaseSettings:  # type: ignore
+            def __init__(self, **kwargs):
+                for k, v in kwargs.items():
+                    setattr(self, k, v)
 
 class Settings(BaseSettings):
     model_name: str = os.getenv("MODEL_NAME", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
