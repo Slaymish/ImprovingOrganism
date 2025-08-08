@@ -4,10 +4,16 @@ A self-improving AI system that learns from feedback to enhance its responses ov
 
 ## 🚀 Features
 
-  - Coherence (grammatical structure, readability)
-  - Novelty (uniqueness compared to past outputs)
-  - Memory Alignment (consistency with stored knowledge)
-  - Relevance (how well output addresses the prompt)
+- FastAPI REST API (generation, feedback, stats, self-learning control)
+- Retrieval-Augmented Generation (semantic context injected when available)
+- Multi-metric Critic (coherence, novelty, memory alignment, relevance, semantic relevance)
+- Configurable Scoring Weights (override via `SCORING_WEIGHTS` JSON env)
+- Preference Learning Scaffold (variant generation + critic-based pair extraction)
+- In-memory Metrics (retrieval + scoring + preference batch stats via `/stats`)
+- Memory System (relational + optional vector mirror; hygiene filters)
+- LoRA Fine-tuning Trigger (feedback threshold logic, mock-friendly)
+- Latent Workspace (uncertainty-aware reasoning; adaptive steps)
+- Lightweight & Fast Start Modes (`FAST_START=1`, `LIGHTWEIGHT_SELF_LEARNING=1`)
 
 ## Preference Learning Scaffold (Phase 2 - Partial)
 An initial preference learning layer has been introduced:
@@ -18,6 +24,19 @@ An initial preference learning layer has been introduced:
 - Metrics extended: preference batches, variants, pairs, latency (exposed via `/stats`).
 
 Next steps (not yet implemented): adaptive temperature/top-p diversity control, duplicate suppression, pair de-duplication, logistic preference loss training routine, and integration into updater fine-tune trigger.
+
+## Fast Start / Lightweight Modes
+To speed up local iteration or CI:
+
+```bash
+export FAST_START=1                 # Skip heavy LLM load in API
+export LIGHTWEIGHT_SELF_LEARNING=1  # Use mock LLM for self-learning & tests
+```
+
+Optional scoring weight override example:
+```bash
+export SCORING_WEIGHTS='{"coherence":0.1,"novelty":0.2,"memory_alignment":0.25,"relevance":0.3,"semantic_relevance":0.15}'
+```
 ## 🧠 Self-Learning System
 
 The system can improve autonomously through several mechanisms:

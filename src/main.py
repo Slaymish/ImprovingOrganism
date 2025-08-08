@@ -11,6 +11,7 @@ try:
     from .self_learning import SelfLearningModule  # type: ignore
     from .lora_trainer import LoRATrainer  # type: ignore
     from .metrics import metrics, time_block  # type: ignore
+    from .config import settings
 except Exception:  # pragma: no cover - fallback for direct execution
     from llm_wrapper import LLMWrapper  # type: ignore
     from memory_module import MemoryModule  # type: ignore
@@ -39,12 +40,16 @@ try:
     logger.info("Core components (memory, critic) initialized")
     
     # Initialize LLM in a separate step (this takes time)
-    try:
-        logger.info("Loading LLM wrapper...")
-        llm = LLMWrapper()
-        logger.info("LLM wrapper initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize LLM wrapper: {e}")
+    if not settings.fast_start:
+        try:
+            logger.info("Loading LLM wrapper...")
+            llm = LLMWrapper()
+            logger.info("LLM wrapper initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize LLM wrapper: {e}")
+            llm = None
+    else:
+        logger.info("FAST_START enabled: skipping LLM initialization (mock mode).")
         llm = None
     
     # Initialize optional components with individual error handling

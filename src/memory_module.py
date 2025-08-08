@@ -4,11 +4,19 @@ try:
     SQLALCHEMY_AVAILABLE = True
 except ImportError:  # pragma: no cover
     SQLALCHEMY_AVAILABLE = False
-    create_engine = Column = Integer = String = Text = DateTime = Float = object  # type: ignore
-    sessionmaker = lambda *a, **k: None  # type: ignore
+    # Provide lightweight stand-ins to avoid attribute errors in tests not exercising DB
+    def _noop(*a, **k): return None
+    class _FakeCol:
+        def __init__(self, *a, **k): pass
+    def create_engine(*a, **k): return None  # type: ignore
+    def sessionmaker(*a, **k): return lambda: None  # type: ignore
+    Column = _FakeCol  # type: ignore
+    class _FakeType:
+        def __call__(self, *a, **k): return self
+    Integer = String = Text = DateTime = Float = _FakeType()  # type: ignore
     def declarative_base():  # type: ignore
-        class Dummy: pass
-        return Dummy
+        class _FakeBase: metadata = type('m', (), {'create_all': staticmethod(lambda *a, **k: None)})()
+        return _FakeBase
 from datetime import datetime
 from typing import List, Optional
 import os

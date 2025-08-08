@@ -15,9 +15,35 @@ except Exception:  # pragma: no cover - fallback when imported as top-level modu
     except Exception:  # pragma: no cover
         metrics = None  # type: ignore
 
+try:
+    from .config import settings  # type: ignore
+except Exception:  # pragma: no cover
+    from config import settings  # type: ignore
+from dataclasses import dataclass
+
+@dataclass
+class ScoreBreakdown:
+    coherence: float
+    novelty: float
+    memory_alignment: float
+    relevance: float
+    semantic_relevance: float
+    overall: float
+
+    def to_dict(self) -> Dict[str, float]:  # compatibility
+        return {
+            'coherence': self.coherence,
+            'novelty': self.novelty,
+            'memory_alignment': self.memory_alignment,
+            'relevance': self.relevance,
+            'semantic_relevance': self.semantic_relevance,
+            'overall': self.overall
+        }
+
 class CriticModule:
     def __init__(self):
         self.common_words = set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'])
+        self.weights = settings.scoring_weights
         
     def score(self, prompt: str, output: str, memory: Any) -> float:  # memory can be SemanticSearcher or list
         """
@@ -34,12 +60,14 @@ class CriticModule:
         semantic_rel_score = self._score_semantic_relevance(prompt, output, memory)
 
         # Weighted combination
+        # Dynamic weighted combination
+        w = self.weights
         final_score = (
-            0.08 * coherence_score +
-            0.22 * novelty_score +
-            0.25 * alignment_score +
-            0.30 * relevance_score +
-            0.15 * semantic_rel_score
+            w['coherence'] * coherence_score +
+            w['novelty'] * novelty_score +
+            w['memory_alignment'] * alignment_score +
+            w['relevance'] * relevance_score +
+            w['semantic_relevance'] * semantic_rel_score
         )
 
         if metrics:
@@ -242,12 +270,11 @@ class CriticModule:
             return 2.5
     
     def get_detailed_scores(self, prompt: str, output: str, memory: Any) -> Dict[str, float]:
-        """Get breakdown of all scoring components"""
-        return {
-            'coherence': self._score_coherence(output),
-            'novelty': self._score_novelty_semantic(output, memory),
-            'memory_alignment': self._score_memory_alignment(prompt, output, memory),
-            'relevance': self._score_relevance(prompt, output),
-            'semantic_relevance': self._score_semantic_relevance(prompt, output, memory),
-            'overall': self.score(prompt, output, memory)
-        }
+        """Get breakdown of all scoring components (dict for backward compatibility)."""
+        coherence = self._score_coherence(output)
+        novelty = self._score_novelty_semantic(output, memory)
+        alignment = self._score_memory_alignment(prompt, output, memory)
+        relevance = self._score_relevance(prompt, output)
+        semantic_rel = self._score_semantic_relevance(prompt, output, memory)
+        overall = self.score(prompt, output, memory)
+        return ScoreBreakdown(coherence, novelty, alignment, relevance, semantic_rel, overall).to_dict()

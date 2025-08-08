@@ -12,7 +12,6 @@ This module implements various techniques to prevent model collapse:
 
 import os
 import json
-import torch
 import logging
 import numpy as np
 from datetime import datetime
@@ -26,10 +25,12 @@ import math
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+torch = None  # placeholder when torch absent
 # Import guards for ML dependencies
-try:
+try:  # pragma: no cover
+    import torch  # type: ignore
     from transformers import (
-        AutoTokenizer, AutoModelForCausalLM, TrainingArguments, 
+        AutoTokenizer, AutoModelForCausalLM, TrainingArguments,
         Trainer, DataCollatorForLanguageModeling
     )
     from peft import (
@@ -37,11 +38,11 @@ try:
         PeftModel
     )
     from datasets import Dataset
-    import torch.nn.functional as F
+    import torch.nn.functional as F  # type: ignore
     ML_AVAILABLE = True
-except ImportError:
+except Exception:
     ML_AVAILABLE = False
-    logger.warning("ML dependencies not available for training safeguards")
+    logger.warning("ML dependencies not available for training safeguards (lightweight mode)")
 
 import sys
 import os

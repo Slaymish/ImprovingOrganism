@@ -1,6 +1,5 @@
 import os
 import json
-import torch
 import logging
 import numpy as np
 from datetime import datetime
@@ -12,21 +11,23 @@ import numpy as np
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Import guards for ML dependencies
-try:
+torch = None  # default placeholder
+# Import guards for ML dependencies (torch + transformers etc.)
+try:  # pragma: no cover - environment dependent
+    import torch  # type: ignore
     from transformers import (
-        AutoTokenizer, AutoModelForCausalLM, TrainingArguments, 
+        AutoTokenizer, AutoModelForCausalLM, TrainingArguments,
         Trainer, DataCollatorForLanguageModeling, EarlyStoppingCallback
     )
     from peft import (
         LoraConfig, get_peft_model, TaskType, prepare_model_for_kbit_training
     )
     from datasets import Dataset
-    import torch.nn.functional as F
+    import torch.nn.functional as F  # type: ignore
     ML_AVAILABLE = True
-except ImportError:
+except Exception:
     ML_AVAILABLE = False
-    logger.warning("ML dependencies not available for LoRA training")
+    logger.warning("ML dependencies not available for LoRA training (running in lightweight mode)")
 
 try:
     from .config import settings  # type: ignore

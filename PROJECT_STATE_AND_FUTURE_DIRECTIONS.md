@@ -60,7 +60,8 @@ Focus: Integrate semantic retrieval, tighten data quality, expose observability.
     * Top-k semantic memories injected into prompt (graceful fallback when unavailable).
     * Retrieval latency + hit metrics recorded.
 2. Embedding-Based Critic Extensions: (PARTIAL)
-    * Added semantic relevance component & metrics recording.
+    * Semantic relevance component & metrics recording.
+    * Scoring weights externalized to config (ENV override ready).
     * (Next) Replace novelty heuristic with centroid-based distance clusters.
 3. Data Hygiene Layer: (PARTIAL)
     * Added rule-based filters (length, repetition, low information) pre-persistence.
@@ -77,8 +78,9 @@ Focus: Integrate semantic retrieval, tighten data quality, expose observability.
 ### Phase 2 (Adaptive Learning & Preference Feedback)
 Focus: Smarter sample selection and model update quality.
 1. Preference Pair Generation: (PARTIAL)
-    * Basic variant generation + critic-based ranking implemented (v1).
-    * (Next) Add diversity controls (temperature/top-p adaptation) & duplicate suppression.
+    * Variant generation + critic-based ranking implemented (v1).
+    * Metrics added (variants, pairs, latency); memory logging of variants.
+    * (Next) Diversity controls (temperature/top-p adaptation) & duplicate suppression.
 2. Lightweight Preference Optimization:
     * Implement DPO or a simplified logistic preference fine-tune using pairs (fall back to single-example SFT if insufficient pairs).
 3. Active Learning Loop:
