@@ -28,8 +28,14 @@ except ImportError:
     ML_AVAILABLE = False
     logger.warning("ML dependencies not available for LoRA training")
 
-from .config import settings
-from .memory_module import MemoryModule
+try:
+    from .config import settings  # type: ignore
+except Exception:  # pragma: no cover
+    from config import settings  # type: ignore
+try:
+    from .memory_module import MemoryModule  # type: ignore
+except Exception:  # pragma: no cover
+    from memory_module import MemoryModule  # type: ignore
 
 # Handle import for training safeguards
 try:

@@ -4,21 +4,20 @@ A self-improving AI system that learns from feedback to enhance its responses ov
 
 ## 🚀 Features
 
-- **FastAPI-based REST API** for text generation and feedback collection
-- **Self-Learning System** that generates its own prompts and evaluates responses
-- **Continuous Learning** with autonomous improvement sessions
-- **Empirical Evaluation** with mathematical accuracy checking
-- **Comprehensive Scoring System** with metrics for:
   - Coherence (grammatical structure, readability)
   - Novelty (uniqueness compared to past outputs)
   - Memory Alignment (consistency with stored knowledge)
   - Relevance (how well output addresses the prompt)
-- **Memory System** with tagged entries for easy retrieval
-- **Automatic LoRA Fine-tuning** based on feedback data
-- **Session Tracking** for grouped interactions
-- **Real-time Dashboard** with self-learning insights
-- **End-to-end Demonstration** script
 
+## Preference Learning Scaffold (Phase 2 - Partial)
+An initial preference learning layer has been introduced:
+- Multiple candidate variants per prompt (configurable `preference_variants`).
+- Critic-scored ranking; high-gap pairs become `PreferencePair` objects.
+- Pairs accumulated via a global `preference_optimizer` for future DPO / logistic preference fine-tuning.
+- Lightweight mode (`LIGHTWEIGHT_SELF_LEARNING=1`) avoids heavy model + vector memory for fast tests.
+- Metrics extended: preference batches, variants, pairs, latency (exposed via `/stats`).
+
+Next steps (not yet implemented): adaptive temperature/top-p diversity control, duplicate suppression, pair de-duplication, logistic preference loss training routine, and integration into updater fine-tune trigger.
 ## 🧠 Self-Learning System
 
 The system can improve autonomously through several mechanisms:

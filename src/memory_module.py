@@ -12,7 +12,10 @@ except ImportError:  # pragma: no cover
 from datetime import datetime
 from typing import List, Optional
 import os
-from .config import settings
+try:
+    from .config import settings  # type: ignore
+except Exception:  # pragma: no cover
+    from config import settings  # type: ignore
 import os as _os
 
 # Optional import of VectorMemory so tests can patch src.memory_module.VectorMemory

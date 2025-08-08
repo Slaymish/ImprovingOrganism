@@ -44,6 +44,12 @@ class MetricsCollector:
     retrieval_semantic: int = 0
     retrieval_latency: _LatencyStats = field(default_factory=_LatencyStats)
 
+    # Preference learning metrics (Phase 2)
+    preference_variant_batches: int = 0
+    preference_variants_total: int = 0
+    preference_pairs_created: int = 0
+    preference_latency: _LatencyStats = field(default_factory=_LatencyStats)
+
     score_components_sum: Dict[str, float] = field(default_factory=lambda: {"coherence": 0.0, "novelty": 0.0, "memory_alignment": 0.0, "relevance": 0.0, "semantic_relevance": 0.0})
     score_components_count: int = 0
 
@@ -61,6 +67,13 @@ class MetricsCollector:
             if k in self.score_components_sum:
                 self.score_components_sum[k] += v
 
+    def record_preference_generation(self, variants: int, pairs: int, latency_s: float):  # pragma: no cover
+        """Record a preference generation event."""
+        self.preference_variant_batches += 1
+        self.preference_variants_total += variants
+        self.preference_pairs_created += pairs
+        self.preference_latency.record(latency_s)
+
     def snapshot(self) -> Dict[str, Any]:
         avg_scores = {}
         for k, total in self.score_components_sum.items():
@@ -76,6 +89,13 @@ class MetricsCollector:
                 "avg_components": avg_scores,
                 "samples": self.score_components_count,
             },
+            "preference": {
+                "batches": self.preference_variant_batches,
+                "total_variants": self.preference_variants_total,
+                "pairs_created": self.preference_pairs_created,
+                "avg_variants_per_batch": (self.preference_variants_total / self.preference_variant_batches) if self.preference_variant_batches else 0.0,
+                "latency": self.preference_latency.snapshot(),
+            }
         }
 
 

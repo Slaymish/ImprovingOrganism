@@ -28,11 +28,20 @@ try:
     from .config import settings  # type: ignore
     from .critic_module import CriticModule  # type: ignore
     from .preference_learning import PreferencePair, preference_optimizer  # type: ignore
+    from .metrics import metrics, time_block  # type: ignore
 except Exception:  # pragma: no cover
     from memory_module import MemoryModule  # type: ignore
     from config import settings  # type: ignore
     from critic_module import CriticModule  # type: ignore
     from preference_learning import PreferencePair, preference_optimizer  # type: ignore
+    try:
+        from metrics import metrics, time_block  # type: ignore
+    except Exception:
+        metrics = None  # type: ignore
+        def time_block():
+            import time as _t
+            start=_t.perf_counter()
+            return lambda: _t.perf_counter()-start
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +94,12 @@ class SelfLearningModule:
         if not self.llm:
             return []
         variants: List[Tuple[str, float]] = []
+        end_timer = time_block() if 'time_block' in globals() else (lambda: (lambda:0))
+        # Store prompt in memory
+        try:
+            self.memory.write(prompt, 'prompt', session_id=self.session_id)
+        except Exception:
+            pass
         for i in range(self.preference_variants):
             try:
                 # Diversity via simple temperature modulation (mock-friendly)
@@ -92,6 +107,11 @@ class SelfLearningModule:
                 # Score using critic (memory provided for semantic context if available)
                 score = self.critic.score(prompt, variant, self.memory)
                 variants.append((variant, score))
+                # Store each variant (tag best later) minimally to memory
+                try:
+                    self.memory.write(variant, 'output_variant', session_id=self.session_id, score=score)
+                except Exception:
+                    pass
             except Exception as e:
                 logger.warning(f"Variant generation failed: {e}")
         if len(variants) < 2:
@@ -101,6 +121,11 @@ class SelfLearningModule:
         pairs: List[PreferencePair] = []
         # Form pairs: best vs each worse if gap large enough
         best_resp, best_score = variants[0]
+        # Write best as canonical output
+        try:
+            self.memory.write(best_resp, 'output', session_id=self.session_id, score=best_score)
+        except Exception:
+            pass
         for worse_resp, worse_score in variants[1:]:
             if best_score - worse_score >= self.min_score_gap:
                 pair = PreferencePair(
@@ -112,6 +137,12 @@ class SelfLearningModule:
                 )
                 preference_optimizer.add_pair(pair)
                 pairs.append(pair)
+        # Metrics
+        if metrics:
+            try:
+                metrics.record_preference_generation(variants=len(variants), pairs=len(pairs), latency_s=end_timer())
+            except Exception:
+                pass
         return pairs
 
     def check_memory_status(self):

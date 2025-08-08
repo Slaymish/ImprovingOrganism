@@ -47,7 +47,10 @@ except ImportError:
     AutoModelForCausalLM = MockModel
     PeftModel = MockModel
 
-from .config import settings
+try:
+    from .config import settings  # type: ignore
+except Exception:  # pragma: no cover
+    from config import settings  # type: ignore
 
 class LLMWrapper:
     def __init__(self):

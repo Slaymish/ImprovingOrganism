@@ -4,12 +4,27 @@ from typing import Optional, Union
 import uuid
 import logging
 from datetime import datetime
-from .llm_wrapper import LLMWrapper
-from .memory_module import MemoryModule
-from .critic_module import CriticModule
-from .self_learning import SelfLearningModule
-from .lora_trainer import LoRATrainer
-from .metrics import metrics, time_block
+try:
+    from .llm_wrapper import LLMWrapper  # type: ignore
+    from .memory_module import MemoryModule  # type: ignore
+    from .critic_module import CriticModule  # type: ignore
+    from .self_learning import SelfLearningModule  # type: ignore
+    from .lora_trainer import LoRATrainer  # type: ignore
+    from .metrics import metrics, time_block  # type: ignore
+except Exception:  # pragma: no cover - fallback for direct execution
+    from llm_wrapper import LLMWrapper  # type: ignore
+    from memory_module import MemoryModule  # type: ignore
+    from critic_module import CriticModule  # type: ignore
+    from self_learning import SelfLearningModule  # type: ignore
+    from lora_trainer import LoRATrainer  # type: ignore
+    try:
+        from metrics import metrics, time_block  # type: ignore
+    except Exception:
+        metrics = None  # type: ignore
+        def time_block():
+            import time as _t
+            start=_t.perf_counter()
+            return lambda: _t.perf_counter()-start
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -242,8 +257,8 @@ def query(request: QueryRequest):
             score=auto_score
         )
         
-    logger.info(f"Generated response for session {session_id} with auto-score {auto_score:.2f} retrieval_items={len(retrieval['items'])} retrieval_semantic={retrieval['semantic']}")
-        
+        logger.info(f"Generated response for session {session_id} with auto-score {auto_score:.2f} retrieval_items={len(retrieval['items'])} retrieval_semantic={retrieval['semantic']}")
+
         return {
             "response": output,
             "session_id": session_id,
@@ -257,7 +272,7 @@ def query(request: QueryRequest):
                 "retrieval_latency_ms": round(retrieval["latency_s"] * 1000, 2)
             }
         }
-        
+    
     except Exception as e:
         logger.error(f"Query failed: {e}")
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
