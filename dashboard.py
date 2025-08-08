@@ -15,7 +15,20 @@ import json
 from datetime import datetime, timedelta
 import time
 import numpy as np
-from scipy import stats
+try:
+    from scipy import stats  # type: ignore
+except Exception:
+    class _StatsFallback:
+        def skew(self, x):
+            return float(np.nan)
+        def kurtosis(self, x):
+            return float(np.nan)
+        def shapiro(self, x):
+            return (0.0, 1.0)
+        def linregress(self, x, y):
+            # slope, intercept, r_value, p_value, std_err
+            return (0.0, 0.0, 0.0, 1.0, 0.0)
+    stats = _StatsFallback()  # type: ignore
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -60,9 +73,133 @@ h1, h2, h3 {
 </style>
 """, unsafe_allow_html=True)
 
-# Constants
-API_BASE_URL = "http://localhost:8000"
+# Constants & dynamic configuration
+DEFAULT_API_BASE = "http://localhost:8000"
+API_BASE_URL = st.session_state.get('api_base', DEFAULT_API_BASE)
 DB_PATH = "data/memory.db"
+
+with st.sidebar:
+    st.subheader("⚙️ Configuration")
+    new_base = st.text_input("API Base URL", API_BASE_URL, help="Point to a running FastAPI instance.")
+    if new_base != API_BASE_URL:
+        st.session_state['api_base'] = new_base.strip().rstrip('/')
+        st.experimental_rerun()
+    auto_refresh = st.checkbox("Auto-refresh (10s)", value=st.session_state.get('auto_refresh', False))
+    st.session_state['auto_refresh'] = auto_refresh
+    st.divider()
+    st.caption("Repro / deterministic runs should set REPRO_MODE=1 on server.")
+
+def safe_api_get(path: str, params=None, timeout: float = 4.0):
+    """Best-effort GET against API. Returns (data, error)."""
+    url = f"{st.session_state.get('api_base', DEFAULT_API_BASE)}{path}"
+    try:
+        r = requests.get(url, params=params, timeout=timeout)
+        if r.status_code != 200:
+            return None, f"HTTP {r.status_code}: {r.text[:120]}"
+        return r.json(), None
+    except Exception as e:
+        return None, str(e)
+
+def safe_api_post(path: str, json_body=None, timeout: float = 8.0):
+    url = f"{st.session_state.get('api_base', DEFAULT_API_BASE)}{path}"
+    try:
+        r = requests.post(url, json=json_body, timeout=timeout)
+        if r.status_code != 200:
+            return None, f"HTTP {r.status_code}: {r.text[:200]}"
+        return r.json(), None
+    except Exception as e:
+        return None, str(e)
+
+def render_health_bar(ok: bool, label: str, detail: str = ""):
+    color = "#2ecc71" if ok else "#e74c3c"
+    st.markdown(f"<div style='padding:0.4rem;border-radius:4px;background:{color};color:white;font-weight:600;'> {label} {'✅' if ok else '⚠️'} </div>", unsafe_allow_html=True)
+    if detail and not ok:
+        st.caption(detail)
+
+@st.cache_data(ttl=10)
+def get_core_stats():
+    data, err = safe_api_get("/stats")
+    return data, err
+
+@st.cache_data(ttl=10)
+def get_self_learning_status():
+    return safe_api_get("/self_learning/status")
+
+@st.cache_data(ttl=10)
+def get_training_trigger_preview():
+    return safe_api_post("/trigger_training")
+
+def compute_recent_diversity(window_hours: int = 24):
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        df = pd.read_sql_query(
+            """
+            SELECT content, entry_type FROM memory
+            WHERE timestamp > datetime('now', ?)
+              AND entry_type in ('output','self_output','output_variant')
+            """, conn, params=(f'-{window_hours} hours',)
+        )
+        conn.close()
+        if df.empty:
+            return {"unique_ratio": 0.0, "count": 0}
+        unique_ratio = df['content'].nunique() / max(1, len(df))
+        return {"unique_ratio": unique_ratio, "count": len(df)}
+    except Exception as e:
+        return {"unique_ratio": 0.0, "count": 0, "error": str(e)}
+
+st.markdown("## 🌐 System Overview")
+colA, colB, colC, colD = st.columns(4)
+core_stats, core_err = get_core_stats()
+sl_status, sl_err = get_self_learning_status()
+train_preview, train_err = get_training_trigger_preview()
+diversity = compute_recent_diversity()
+
+with colA:
+    render_health_bar(core_stats is not None, "API /stats", core_err or "")
+    st.metric("Total Entries", core_stats.get('total_entries') if core_stats else 0)
+with colB:
+    render_health_bar(sl_status and sl_status.get('available'), "Self-Learning", (sl_err or sl_status.get('reason') if sl_status else ""))
+    if core_stats and 'average_score' in core_stats:
+        st.metric("Avg Score", core_stats['average_score'], delta=core_stats.get('recent_average_score'))
+with colC:
+    if diversity.get('count'):
+        st.metric("Output Diversity", f"{diversity['unique_ratio']*100:.1f}%", help="Unique outputs / total last 24h")
+    if core_stats and core_stats.get('metrics'):
+        r = core_stats['metrics']['retrieval']
+        st.metric("Retrieval Hit%", f"{r['hit_rate']*100:.1f}%")
+with colD:
+    if train_preview:
+        readiness = train_preview.get('ready_for_training')
+        render_health_bar(readiness, "Training Ready", detail=f"Pairs: {train_preview.get('training_pairs')}" )
+    if core_stats and core_stats.get('metrics'):
+        pref = core_stats['metrics']['preference']
+        st.metric("Pref Pairs", pref.get('pairs_created', 0))
+
+st.markdown("### 🧪 Action Center")
+ac1, ac2, ac3 = st.columns([1,1,2])
+with ac1:
+    st.caption("Start Self-Learning Session")
+    iters = st.number_input("Iterations", 1, 20, 5, help="Number of autonomous cycles")
+    if st.button("Run Self-Learning", use_container_width=True):
+        res, err = safe_api_post("/self_learning/start_session", {"iterations": int(iters)})
+        if err:
+            st.error(f"Failed: {err}")
+        else:
+            st.success(f"Session {res['session_id']} avg={res['average_score']}")
+with ac2:
+    st.caption("Manual Training Cycle Preview")
+    if st.button("Preview Training", use_container_width=True):
+        st.experimental_rerun()
+    if train_preview:
+        st.write({k: v for k, v in train_preview.items() if k != 'message'})
+with ac3:
+    st.caption("Metrics Snapshot")
+    if core_stats and core_stats.get('metrics'):
+        scoring = core_stats['metrics']['scoring']
+        avg_comp = scoring.get('avg_components', {})
+        st.json({k: round(v,3) for k,v in avg_comp.items()})
+
+st.divider()
 
 @st.cache_data(ttl=30)
 def get_advanced_memory_stats():
@@ -476,16 +613,11 @@ def initiate_self_learning(iterations, topic=None):
             "iterations": iterations,
             "topic": topic if topic and topic.strip() else None
         }
-        
         with st.spinner(f"Initiating self-learning session ({iterations} iterations)..."):
-            response = requests.post(
-                f"{API_BASE_URL}/self_learn",
-                json=payload,
-                timeout=300  # Increased to 5 minutes for longer sessions
-            )
-        
-        if response.status_code == 200:
-            result = response.json()
+            result, err = _post_json("/self_learn", payload, timeout=300)
+        if err:
+            st.error(f"❌ Failed to start self-learning: {err}")
+            return
             st.success(f"🚀 Self-learning session started!")
             
             with st.expander("📋 Session Details", expanded=True):
@@ -501,30 +633,18 @@ def initiate_self_learning(iterations, topic=None):
                 st.info("💡 You can check the system statistics to monitor progress.")
             elif "progress" in result:
                 st.info(f"📈 Progress: {result['progress']}")
-                
-        else:
-            st.error(f"❌ Failed to start self-learning: {response.status_code}")
-            try:
-                error_detail = response.json()
-                st.error(f"Details: {error_detail.get('detail', 'Unknown error')}")
-            except:
-                st.error(f"HTTP Status: {response.status_code}")
             
     except Exception as e:
         st.error(f"❌ Error starting self-learning: {str(e)}")
 
 def initiate_training_session():
-    """Start a LoRA training session"""
+    """Start a LoRA training session (basic pathway)"""
     try:
         with st.spinner("Starting LoRA training session..."):
-            response = requests.post(
-                f"{API_BASE_URL}/train",
-                json={"mode": "lora"},
-                timeout=30
-            )
-        
-        if response.status_code == 200:
-            result = response.json()
+            result, err = _post_json("/train", {"mode": "lora"}, timeout=60)
+        if err:
+            st.error(f"❌ Failed to start LoRA training: {err}")
+            return
             
             if result.get('status') == 'insufficient_data':
                 st.warning("⚠️ **Insufficient Training Data**")
@@ -560,37 +680,40 @@ def initiate_training_session():
                                 st.error(f"❌ Training failed: {training_result.get('error', 'Unknown error')}")
                         
         else:
-            st.error(f"❌ Failed to start LoRA training: {response.status_code}")
-            try:
-                error_detail = response.json()
-                st.error(f"Details: {error_detail.get('detail', 'Unknown error')}")
-            except:
-                st.error(f"HTTP Status: {response.status_code}")
+            pass
                 
     except Exception as e:
         st.error(f"❌ Error starting LoRA training: {str(e)}")
 
 def force_training():
-    """Force LoRA training even with insufficient data"""
+    """Force LoRA training even with insufficient data (override safety)"""
     try:
         with st.spinner("Force starting LoRA training..."):
-            response = requests.post(
-                f"{API_BASE_URL}/train",
-                json={"mode": "lora", "force_retrain": True},
-                timeout=60
-            )
-        
-        if response.status_code == 200:
-            result = response.json()
+            result, err = _post_json("/train", {"mode": "lora", "force_retrain": True}, timeout=120)
+        if err:
+            st.error(f"❌ Force training failed: {err}")
+            return
             st.success("🚀 Forced LoRA Training Started!")
             
             with st.expander("🏋️ Force Training Details", expanded=True):
                 st.json(result)
-        else:
-            st.error(f"❌ Force training failed: {response.status_code}")
             
     except Exception as e:
         st.error(f"❌ Error with force training: {str(e)}")
+
+def _post_json(path: str, payload: dict, timeout: int = 60):
+    """Internal helper to POST JSON and return (result, error)."""
+    try:
+        r = requests.post(f"{API_BASE_URL}{path}", json=payload, timeout=timeout)
+        if r.status_code != 200:
+            try:
+                detail = r.json().get('detail', r.text[:120])
+            except Exception:
+                detail = r.text[:120]
+            return None, f"HTTP {r.status_code}: {detail}"
+        return r.json(), None
+    except Exception as ex:
+        return None, str(ex)
 
 def get_recent_responses(limit=10):
     """Get recent LLM responses for feedback"""
@@ -780,7 +903,7 @@ def validate_adapter():
     """Validate current adapter for model collapse and knowledge retention"""
     with st.spinner("Running adapter validation tests..."):
         try:
-            response = requests.get(f"{API_BASE}/train/validate", timeout=60)
+            response = requests.get(f"{API_BASE_URL}/train/validate", timeout=60)
             
             if response.status_code == 200:
                 result = response.json()
@@ -867,7 +990,7 @@ def validate_adapter():
             st.error(f"❌ Validation error: {str(e)}")
 
 def start_advanced_training(min_score: float, max_samples: int, force_retrain: bool):
-    """Start advanced LoRA training with custom parameters"""
+    """Start advanced LoRA training with custom parameters and safeguards"""
     try:
         payload = {
             "mode": "lora",
@@ -877,14 +1000,10 @@ def start_advanced_training(min_score: float, max_samples: int, force_retrain: b
         }
         
         with st.spinner("Initiating advanced LoRA training... This may take several minutes."):
-            response = requests.post(
-                f"{API_BASE_URL}/train",
-                json=payload,
-                timeout=600  # 10 minutes timeout for training
-            )
-        
-        if response.status_code == 200:
-            result = response.json()
+            result, err = _post_json("/train", payload, timeout=600)
+        if err:
+            st.error(f"❌ Advanced LoRA training failed: {err}")
+            return
             
             if result.get('status') == 'insufficient_data' and not force_retrain:
                 st.warning("⚠️ **Insufficient Training Data**")
@@ -918,14 +1037,6 @@ def start_advanced_training(min_score: float, max_samples: int, force_retrain: b
                         st.info("💡 Training is running in the background. Check training status to monitor progress.")
                     else:
                         st.error(f"❌ Training failed: {result.get('message', 'Unknown error')}")
-                
-        else:
-            st.error(f"❌ Advanced LoRA training failed: {response.status_code}")
-            try:
-                error_detail = response.json()
-                st.error(f"Details: {error_detail.get('detail', 'Unknown error')}")
-            except:
-                st.error(f"HTTP Status: {response.status_code}")
                 
     except requests.exceptions.Timeout:
         st.error("⏱️ Training request timed out. The training may still be running in the background.")
@@ -1015,7 +1126,7 @@ def main():
         
         # Display training health status
         try:
-            health_response = requests.get(f"{API_BASE}/train/health")
+            health_response = requests.get(f"{API_BASE_URL}/train/health")
             if health_response.status_code == 200:
                 health_data = health_response.json()
                 system_health = health_data.get("system_health", "unknown")

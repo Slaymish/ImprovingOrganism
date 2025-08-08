@@ -2,6 +2,17 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional, Union
 import uuid
+try:
+    from .seed_utils import apply_global_seed  # type: ignore
+except Exception:
+    try:
+        from seed_utils import apply_global_seed  # type: ignore
+    except Exception:
+        def apply_global_seed(seed: int):
+            pass
+
+if settings.reproducibility:
+    apply_global_seed(settings.repro_seed)
 import logging
 from datetime import datetime
 try:
@@ -188,24 +199,26 @@ def simple_query(request: QueryRequest):
         }
     }
 
+class DefaultRetrievalProvider:
+    def __init__(self, mem: MemoryModule):
+        self.mem = mem
+    def retrieve(self, query: str, max_items: int = 5):  # pragma: no cover
+        try:
+            res = self.mem.search_semantic(query, limit=max_items)
+            return [r.get('content','') for r in res if r.get('content')]
+        except Exception:
+            return []
+
+retrieval_provider = DefaultRetrievalProvider(memory)
+
 def _build_retrieval_context(user_text: str, max_items: int = 5) -> dict:
-    """Retrieve semantic (if available) context. Records metrics.
-    Returns dict with keys: items (list[str]), semantic (bool), latency_s (float).
-    """
+    """RAG boundary using retrieval_provider; records metrics."""
     timer = time_block()
-    items = []
-    semantic_used = False
-    try:
-        results = memory.search_semantic(user_text, limit=max_items)
-        if results:
-            semantic_used = True
-            items = [r.get('content', '') for r in results if r.get('content')]
-    except Exception:
-        items = []
+    items = retrieval_provider.retrieve(user_text, max_items=max_items) if retrieval_provider else []
     latency = timer()
     if metrics:
-        metrics.record_retrieval(latency, len(items), semantic_used)
-    return {"items": items, "semantic": semantic_used, "latency_s": latency}
+        metrics.record_retrieval(latency, len(items), bool(items))
+    return {"items": items, "semantic": bool(items), "latency_s": latency}
 
 @app.post("/query")
 def query(request: QueryRequest):

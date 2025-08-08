@@ -45,6 +45,18 @@ except Exception:  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 
+try:
+    from .seed_utils import apply_global_seed  # type: ignore
+except Exception:
+    try:
+        from seed_utils import apply_global_seed  # type: ignore
+    except Exception:
+        def apply_global_seed(seed: int):
+            pass
+
+if settings.reproducibility:
+    apply_global_seed(settings.repro_seed)
+
 class SelfLearningModule:
     def __init__(self):
         # Lightweight test mode to avoid heavy model loading
@@ -105,11 +117,11 @@ class SelfLearningModule:
                 # Diversity via simple temperature modulation (mock-friendly)
                 variant = self.llm.generate(prompt, max_tokens=self.max_response_length)
                 # Score using critic (memory provided for semantic context if available)
-                score = self.critic.score(prompt, variant, self.memory)
-                variants.append((variant, score))
+                breakdown = self.critic.evaluate(prompt, variant, self.memory)
+                variants.append((variant, breakdown.overall))
                 # Store each variant (tag best later) minimally to memory
                 try:
-                    self.memory.write(variant, 'output_variant', session_id=self.session_id, score=score)
+                    self.memory.write(variant, 'output_variant', session_id=self.session_id, score=breakdown.overall)
                 except Exception:
                     pass
             except Exception as e:

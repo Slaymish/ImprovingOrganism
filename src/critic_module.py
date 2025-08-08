@@ -81,6 +81,39 @@ class CriticModule:
 
         return min(5.0, max(0.0, final_score))
 
+    def evaluate(self, prompt: str, output: str, memory: Any) -> ScoreBreakdown:
+        """Return full structured score breakdown."""
+        coherence_score = self._score_coherence(output)
+        novelty_score = self._score_novelty_semantic(output, memory)
+        alignment_score = self._score_memory_alignment(prompt, output, memory)
+        relevance_score = self._score_relevance(prompt, output)
+        semantic_rel_score = self._score_semantic_relevance(prompt, output, memory)
+        w = self.weights
+        overall = (
+            w['coherence'] * coherence_score +
+            w['novelty'] * novelty_score +
+            w['memory_alignment'] * alignment_score +
+            w['relevance'] * relevance_score +
+            w['semantic_relevance'] * semantic_rel_score
+        )
+        overall = min(5.0, max(0.0, overall))
+        if metrics:
+            metrics.record_scores({
+                'coherence': coherence_score,
+                'novelty': novelty_score,
+                'memory_alignment': alignment_score,
+                'relevance': relevance_score,
+                'semantic_relevance': semantic_rel_score
+            })
+        return ScoreBreakdown(
+            coherence=coherence_score,
+            novelty=novelty_score,
+            memory_alignment=alignment_score,
+            relevance=relevance_score,
+            semantic_relevance=semantic_rel_score,
+            overall=overall
+        )
+
     def _score_novelty_semantic(self, output: str, memory: Any) -> float:
         """Score based on semantic uniqueness compared to previous outputs."""
         if not hasattr(memory, 'search_semantic'):

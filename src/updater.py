@@ -44,6 +44,17 @@ from .llm_wrapper import LLMWrapper
 from .memory_module import MemoryModule
 from .critic_module import CriticModule
 from .config import settings
+try:
+    from .seed_utils import apply_global_seed  # type: ignore
+except Exception:
+    try:
+        from seed_utils import apply_global_seed  # type: ignore
+    except Exception:
+        def apply_global_seed(seed: int):
+            pass
+
+if settings.reproducibility:
+    apply_global_seed(settings.repro_seed)
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -142,14 +153,32 @@ class Updater:
     
     def fine_tune_lora(self, training_pairs: List[Tuple[str, str, float]]) -> bool:
         """Fine-tune the LoRA adapter on feedback data"""
+        # Diversity safeguard: ensure enough unique outputs to justify training
+        try:
+            outputs = [o for _, o, _ in training_pairs]
+            unique_ratio = len(set(outputs)) / max(1, len(outputs))
+            if unique_ratio < settings.min_training_diversity:
+                logger.info(f"Skipping training due to low diversity (unique_ratio={unique_ratio:.2f} < {settings.min_training_diversity}).")
+                self.memory.write(
+                    f"TRAINING_SKIPPED_LOW_DIVERSITY: {unique_ratio:.2f}",
+                    entry_type="training_skip",
+                    session_id="updater"
+                )
+                return False
+        except Exception:
+            pass
         if not ML_AVAILABLE:
             logger.info("⚠️  ML dependencies not available. Skipping training (mock mode).")
-            # Mock training for development
-            self.memory.write(
-                f"MOCK_TRAINING: {len(training_pairs)} samples (development mode)",
-                entry_type="training",
-                session_id="updater"
-            )
+            # Mock training for development (avoid DB write if memory lacks SQLAlchemy session)
+            try:
+                if getattr(self.memory, 'session', None) is not None:
+                    self.memory.write(
+                        f"MOCK_TRAINING: {len(training_pairs)} samples (development mode)",
+                        entry_type="training",
+                        session_id="updater"
+                    )
+            except Exception:
+                pass
             self.last_training_time = datetime.utcnow()
             return True
             

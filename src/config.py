@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     feedback_threshold: int = 50
     batch_size: int = 8
     fast_start: bool = os.getenv("FAST_START", "false").lower() == "true"
+    reproducibility: bool = os.getenv("REPRO_MODE", "false").lower() == "true"
+    repro_seed: int = int(os.getenv("REPRO_SEED", "42"))
+    min_training_diversity: float = float(os.getenv("MIN_TRAINING_DIVERSITY", "0.5"))  # ratio unique outputs
     
     # Memory management settings
     force_cpu: bool = os.getenv("FORCE_CPU", "false").lower() == "true"

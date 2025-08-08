@@ -46,11 +46,11 @@ The project is now a resilient, test‑backed "adaptive AI substrate" with a com
 | Test Depth | Few adversarial / load / regression datasets | Unknown robustness envelope. |
 
 ### 1.4 Technical Debt / Cleanup Targets
-* Centralize scoring weight config (externalize to settings). 
-* Consolidate duplicate random seed usage; enforce reproducibility toggle.
-* Add structured result object for critic instead of dict with loose keys.
-* Introduce abstraction boundary between generation & retrieval (RAG slot).
-* Harden updater to skip retraining on low-diversity batches.
+* (DONE) Centralize scoring weight config (externalize to settings).
+* (DONE) Consolidate duplicate random seed usage; enforce reproducibility toggle.
+* (DONE) Structured result object for critic (ScoreBreakdown + evaluate()).
+* (DONE) Abstraction boundary between generation & retrieval (provider slot).
+* (DONE) Updater diversity safeguard (skip low-diversity batches).
 
 ## 2. Roadmap (Realistic, Incremental, Impact-Oriented)
 
