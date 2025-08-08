@@ -355,3 +355,65 @@ The system is designed for extensibility:
 ---
 
 **Happy learning and improving! 🎉**
+
+## 🧩 Optional Dependencies & Fallback Behavior
+
+The project is designed to run in lightweight (dev) or full (prod) modes by making several heavy dependencies optional. Each module degrades gracefully when a dependency is unavailable:
+
+| Component | Optional Dependency | Fallback Behavior |
+|-----------|---------------------|-------------------|
+| `latent_workspace` | `torch` | Uses NumPy arrays and disables tensor-specific uncertainty refinement |
+| `memory_module` | `sqlalchemy` | In-memory (no-op persistence) mode; basic structures still usable |
+| `vector_memory` | `weaviate-client` | Vector search disabled; all calls become safe no-ops returning empty results |
+| `config` | `pydantic_settings` | Falls back to a minimal shim reading environment variables |
+| `llm_wrapper` | `transformers`, `peft` | Mock text generation & random embeddings in dev mode |
+
+### Development vs Production Imports
+Guarded imports look like:
+```python
+try:
+  import torch
+except Exception:
+  torch = None  # Fallback handled downstream
+```
+Code paths then check availability (e.g., `if self.torch:`) before executing heavy logic.
+
+### Protocol-Based Abstractions
+To reduce tight coupling and ease testing, protocol interfaces (PEP 544) are defined in `src/interfaces.py`:
+
+```python
+class SemanticSearcher(Protocol):
+  def search(self, query: str, limit: int = 5) -> list: ...
+
+class VectorMemoryLike(Protocol):
+  def add_entry(self, content: str, entry_type: str = "generic"): ...
+  def search(self, query: str, limit: int = 5) -> list: ...
+```
+
+Any object implementing these methods can be injected (e.g., mocks in tests), enabling lighter unit tests without real backends.
+
+### Suppressing External Warnings
+Some third-party packages (e.g., protobuf) emit noisy version warnings during tests. These are filtered via `pytest.ini`:
+```ini
+[pytest]
+filterwarnings =
+  ignore:Protobuf gencode version.*:UserWarning
+```
+
+### When to Install Full Dependencies
+Install `requirements.txt` if you need:
+* Real model inference (transformers / peft)
+* LoRA fine-tuning
+* Persistent SQL memory
+* Vector semantic search (Weaviate)
+
+Otherwise, `requirements-dev.txt` is sufficient for logic tests, API scaffolding, and fast iteration.
+
+### Adding a New Optional Backend
+1. Wrap the import in a `try/except` block.
+2. Provide a clearly named availability flag (e.g., `BACKEND_AVAILABLE`).
+3. Short-circuit public methods with safe no-ops returning defaults.
+4. Log a single informative warning on first use.
+5. Add a Protocol if multiple interchangeable implementations are expected.
+
+---

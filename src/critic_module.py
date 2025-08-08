@@ -1,6 +1,10 @@
 import re
 import json
 from typing import List, Dict, Any
+try:  # Optional protocol import
+    from .interfaces import SemanticSearcher
+except Exception:  # pragma: no cover
+    SemanticSearcher = Any  # type: ignore
 from collections import Counter
 import math
 
@@ -8,7 +12,7 @@ class CriticModule:
     def __init__(self):
         self.common_words = set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'])
         
-    def score(self, prompt: str, output: str, memory: List[Any]) -> float:
+    def score(self, prompt: str, output: str, memory: Any) -> float:  # memory can be SemanticSearcher or list
         """
         Comprehensive scoring that considers:
         - Coherence (grammatical structure, logical flow)
@@ -31,7 +35,7 @@ class CriticModule:
         
         return min(5.0, max(0.0, final_score))
 
-    def _score_novelty_semantic(self, output: str, memory: List[Any]) -> float:
+    def _score_novelty_semantic(self, output: str, memory: Any) -> float:
         """Score based on semantic uniqueness compared to previous outputs."""
         if not hasattr(memory, 'search_semantic'):
             # Fallback to old method if memory module doesn't support semantic search
@@ -93,7 +97,7 @@ class CriticModule:
             
         return score
     
-    def _score_novelty(self, output: str, memory: List[Any]) -> float:
+    def _score_novelty(self, output: str, memory: Any) -> float:
         """Score based on uniqueness compared to previous outputs"""
         if not memory:
             return 4.0  # High novelty if no history
@@ -120,7 +124,7 @@ class CriticModule:
         
         return max(0.0, novelty_score)
     
-    def _score_memory_alignment(self, prompt: str, output: str, memory: List[Any]) -> float:
+    def _score_memory_alignment(self, prompt: str, output: str, memory: Any) -> float:
         """Score based on consistency with stored knowledge"""
         if not memory:
             return 3.0  # Neutral if no memory
@@ -189,7 +193,7 @@ class CriticModule:
 
         return min(5.0, base_score)
     
-    def get_detailed_scores(self, prompt: str, output: str, memory: List[Any]) -> Dict[str, float]:
+    def get_detailed_scores(self, prompt: str, output: str, memory: Any) -> Dict[str, float]:
         """Get breakdown of all scoring components"""
         return {
             'coherence': self._score_coherence(output),

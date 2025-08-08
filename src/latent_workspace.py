@@ -2,6 +2,9 @@ import numpy as np
 from collections import deque
 from typing import Dict, List, Optional, Tuple, Any, Union
 import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 try:
     import torch  # type: ignore
@@ -38,7 +41,7 @@ class LatentWorkspace:
         self.torch = torch if ML_AVAILABLE else None
         
         if not ML_AVAILABLE:
-            print("⚠️  ML dependencies not available. LatentWorkspace running in mock mode.")
+            logger.warning("ML dependencies not available. LatentWorkspace running in mock mode.")
             self._init_mock()
             return
             
@@ -479,8 +482,8 @@ class LatentWorkspace:
             embeddings = embeddings.unsqueeze(0)
             
         # Compute variance across embedding dimensions
-        embedding_var = torch.var(embeddings, dim=0)
-        
+        # Use unbiased=False to avoid degrees of freedom warnings for small batches
+        embedding_var = torch.var(embeddings, dim=0, unbiased=False)
         # Update uncertainty map with exponential moving average
         self.uncertainty_map = 0.9 * self.uncertainty_map + 0.1 * embedding_var
 
